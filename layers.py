@@ -34,6 +34,7 @@ class GraphConvolution(Module):
             self.register_parameter('bias', None)  # 如果不使用偏置项，注册为None
         self.reset_parameters()  # 重置参数
 
+
     def reset_parameters(self):
         # 使用均匀分布初始化权重和偏置
         stdv = 1. / math.sqrt(self.weight.size(1))  # 计算标准差

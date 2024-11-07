@@ -1,16 +1,13 @@
-# 这是一个示例 Python 脚本。
-
-# 按 Shift+F10 执行或将其替换为您的代码。
-# 按 双击 Shift 在所有地方搜索类、文件、工具窗口、操作和设置。
+import untils
 
 
-def print_hi(name):
-    # 在下面的代码行中使用断点来调试脚本。
-    print(f'Hi, {name}')  # 按 Ctrl+F8 切换断点。
 
 
-# 按间距中的绿色按钮以运行脚本。
-if __name__ == '__main__':
-    print_hi('PyCharm')
 
-# 访问 https://www.jetbrains.com/help/pycharm/ 获取 PyCharm 帮助
+input_file = 'D:/zhuomian/file/弱网中鲁棒性的恶意节点检测/exp/dataset/20241106_testTX_constantUniform_simtime-100_num_nodes-50_BHradio-0_SFradio-0_fieldLength-20_uniform-1/MonitorSnifferRx.csv'  # 输入CSV文件路径
+output_file = 'D:/zhuomian/file/弱网中鲁棒性的恶意节点检测/exp/dataset/20241106_testTX_constantUniform_simtime-100_num_nodes-50_BHradio-0_SFradio-0_fieldLength-20_uniform-1/ProcessedMonitorSnifferRx.csv'  # 输出CSV文件路径
+log_file = r"D:/zhuomian/file/弱网中鲁棒性的恶意节点检测/exp/dataset/20241106_testTX_constantUniform_simtime-100_num_nodes-50_BHradio-0_SFradio-0_fieldLength-20_uniform-1/log1106_uniform_20#%20_seed_12345.txt"
+
+untils.process_csv(input_file, output_file, log_file)
+
+

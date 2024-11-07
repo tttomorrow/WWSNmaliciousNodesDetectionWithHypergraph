@@ -1,93 +1,129 @@
-from collections import defaultdict
-
-import gpustat
+import pandas as pd
 import numpy as np
-import torch
+import re
 
 
-def select_free_gpu():
-    mem = []
-    gpus = list(set(range(torch.cuda.device_count())))  # list(set(X)) is done to shuffle the array
-    print(gpus)
-    for i in gpus:
-        gpu_stats = gpustat.GPUStatCollection.new_query()
-        mem.append(gpu_stats.jsonify()["gpus"][i]["memory.used"])
-    print(str(gpus[np.argmin(mem)]))
-    return str(gpus[np.argmin(mem)])
+def parse_log_file(log_file, time_interval):
+    """
+    解析日志文件，提取恶意节点、黑洞节点、丢包信息，并按时间段整理。
+    返回字典，包含每个时间段内的丢包信息以及恶意和黑洞节点。
+    """
+    malicious_nodes = set()
+    blackhole_nodes = set()
+    drop_packet_info = {}
+
+    # 解析日志文件
+    with open(log_file, 'r') as file:
+        for line in file:
+            # 解析黑洞节点
+            blackhole_match = re.match(r"Node (\d+) marked for Blackhole.", line)
+            if blackhole_match:
+                node_id = int(blackhole_match.group(1))
+                blackhole_nodes.add(node_id)
+
+            # 解析恶意节点（根据实际情况调整匹配规则）
+            malicious_match = re.match(r"randomNumbers(\d+)", line)
+            if malicious_match:
+                node_id = int(malicious_match.group(1))
+                malicious_nodes.add(node_id)
+
+            # 解析丢包信息
+            drop_match = re.match(r"\[node (\d+)] time:(\d+\.\d+), Drop packet (\d+)", line)
+            if drop_match:
+                node_id = int(drop_match.group(1))
+                timestamp = float(drop_match.group(2))
+
+                # 根据时间段分组丢包信息
+                time_segment = np.floor(timestamp / time_interval) * time_interval
+
+                if time_segment not in drop_packet_info:
+                    drop_packet_info[time_segment] = {}
+
+                if node_id not in drop_packet_info[time_segment]:
+                    drop_packet_info[time_segment][node_id] = 0
+
+                drop_packet_info[time_segment][node_id] += 1
+
+    return {
+        'malicious_nodes': malicious_nodes,
+        'blackhole_nodes': blackhole_nodes,
+        'drop_packet_info': drop_packet_info
+    }
 
 
-def reinitialize_tbatches():
-    global current_tbatches_interactionids, current_tbatches_user, current_tbatches_item, current_tbatches_timestamp, current_tbatches_feature, current_tbatches_label, current_tbatches_previous_item
-    global tbatchid_user, tbatchid_item, current_tbatches_user_timediffs, current_tbatches_item_timediffs, current_tbatches_user_timediffs_next
+def process_csv(input_file, output_file, log_file, time_interval=10.0):
+    # 读取 CSV 文件
+    df = pd.read_csv(input_file)
+    print(df.columns)  # 查看列名
 
-    # list of users of each tbatch up to now
-    current_tbatches_interactionids = defaultdict(list)
-    current_tbatches_user = defaultdict(list)
-    current_tbatches_item = defaultdict(list)
-    current_tbatches_timestamp = defaultdict(list)
-    current_tbatches_feature = defaultdict(list)
-    current_tbatches_label = defaultdict(list)
-    current_tbatches_previous_item = defaultdict(list)
-    current_tbatches_user_timediffs = defaultdict(list)
-    current_tbatches_item_timediffs = defaultdict(list)
-    current_tbatches_user_timediffs_next = defaultdict(list)
+    # 解析日志文件
+    log_data = parse_log_file(log_file, time_interval)
 
-    # the latest tbatch a user is in
-    tbatchid_user = defaultdict(lambda: -1)
+    # 确保时间列是浮动类型
+    df['Time'] = df['Time'].astype(float)
 
-    # the latest tbatch a item is in
-    tbatchid_item = defaultdict(lambda: -1)
+    # 创建时间段列（按时间间隔分段）
+    df['TimeSegment'] = np.floor(df['Time'] / time_interval) * time_interval
 
-    global total_reinitialization_count
-    total_reinitialization_count += 1
+    # 初始化结果列表
+    result = []
 
+    # 按时间段分组，遍历每个时间段
+    for time_segment, group in df.groupby('TimeSegment'):
+        # 按照监听节点和被监听节点分组
+        for listener, sub_group in group.groupby('listener'):
+            for src_node_id, src_group in sub_group.groupby('SrcNodeId'):
+                # 计算信道质量指标（例如：SNR, SignalPower, NoisePower的均值）
+                avg_snr = src_group['SNR'].mean()
+                avg_signal_power = src_group['SignalPower'].mean()
+                avg_noise_power = src_group['NoisePower'].mean()
 
-def group_interactions_by_item(item_sequence_id):
-    item_to_interactions = defaultdict(list)
-    for j, item_id in enumerate(item_sequence_id):
-        item_to_interactions[item_id].append(j)
-    return item_to_interactions
+                # 统计每个数据包类型的发送次数
+                packet_counts = src_group['PacketType'].value_counts().to_dict()
 
-# Define a function to create t-batches based on grouped interactions
-def create_t_batches(timestamp_sequence, interaction_groups, tbatch_timespan):
-    t_batches = []
-    current_t_batch = []
-
-    for item_id, interactions in interaction_groups.items():
-        interactions.sort(key=lambda j: timestamp_sequence[j])
-        for j in interactions:
-            timestamp = timestamp_sequence[j]
-
-            if not current_t_batch or timestamp - current_t_batch[0]["start_time"] <= tbatch_timespan:
-                current_t_batch.append({"j": j, "start_time": timestamp})
-            else:
-                t_batches.append(current_t_batch)
-                current_t_batch = [{"j": j, "start_time": timestamp}]
-
-    if current_t_batch:
-        t_batches.append(current_t_batch)
-
-    return t_batches
+                # 获取UDP、ARP、ADOV的发送次数，其他包类型不统计
+                udp_count = packet_counts.get('UDP', 0)
+                arp_request_count = packet_counts.get('ARP Request', 0)
+                arp_reply_count = packet_counts.get('ARP Replay', 0)
+                route_request_count = packet_counts.get('Route Request', 0)
+                route_reply_count = packet_counts.get('Route Replay', 0)
+                route_error_count = packet_counts.get('Route Error', 0)
+                route_reply_ack_count = packet_counts.get('Route Replay ACK', 0)
+                ack_count = packet_counts.get('ACK', 0)
 
 
+                # 获取当前时间段丢包次数
+                drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(src_node_id, 0)
 
+                # 是否是恶意节点、黑洞节点
+                is_malicious = 1 if src_node_id in log_data['malicious_nodes'] else 0
+                is_blackhole = 1 if src_node_id in log_data['blackhole_nodes'] else 0
+                is_selective_forwarding = 0  # 暂时没有选择性转发节点的具体信息
 
-# 创建一个函数来构建超图
-def construct_hypergraph(user_sequence_id, item_sequence_id, t_batch):
-    hypergraph = {"t_batch_users": [], "Item-to-Users Mapping": {}}
+                # 创建结果记录
+                result.append({
+                    'ListenerNode': listener,
+                    'SrcNodeId': src_node_id - 1,
+                    'UDPCount': udp_count,
+                    'ARPRequestCount': arp_request_count,
+                    'ARPReplayCount': arp_reply_count,
+                    'RouteRequestCount': route_request_count,
+                    'RouteReplayCount': route_reply_count,
+                    'RouteErrorCount': route_error_count,
+                    'RouteReplayACKCount': route_reply_ack_count,
+                    'ACKCount': ack_count,
+                    'AvgSNR': avg_snr,
+                    'AvgSignalPower': avg_signal_power,
+                    'AvgNoisePower': avg_noise_power,
+                    'PacketLossCount': drop_count,
+                    'IsMaliciousNode': is_malicious,
+                    'IsBlackholeNode': is_blackhole,
+                    'IsSelectiveForwardingNode': is_selective_forwarding,
+                    'TimeSegment': time_segment
+                })
 
-    for entry in t_batch:
-        user_id = user_sequence_id[entry["j"]]
-        item_id = item_sequence_id[entry["j"]]
+    # 将结果转换为 DataFrame
+    result_df = pd.DataFrame(result)
 
-        # 将用户添加到当前 t-batch 的超图
-        hypergraph["t_batch_users"].append(user_id)
-
-        # 将用户与项目关联
-        hypergraph["Item-to-Users Mapping"].setdefault(item_id, set()).add(user_id)
-
-    return hypergraph
-
-
-
-
+    # 保存结果到 CSV 文件
+    result_df.to_csv(output_file, index=False)

@@ -6,6 +6,7 @@ from torch.nn.parameter import Parameter
 from torch.nn.modules.module import Module
 from torch_geometric.nn import HypergraphConv  # 导入超图卷积层的实现
 
+
 # 定义超图卷积层
 class HypergraphConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -15,6 +16,7 @@ class HypergraphConvLayer(nn.Module):
     def forward(self, x, edge_index, edge_weight):
         # 前向传播函数，输入为节点特征、超边连接和超边权重
         return self.conv(x, edge_index, edge_weight)  # 返回卷积层的输出
+
 
 # 定义图卷积层
 class GraphConvolution(Module):
@@ -34,7 +36,6 @@ class GraphConvolution(Module):
             self.register_parameter('bias', None)  # 如果不使用偏置项，注册为None
         self.reset_parameters()  # 重置参数
 
-
     def reset_parameters(self):
         # 使用均匀分布初始化权重和偏置
         stdv = 1. / math.sqrt(self.weight.size(1))  # 计算标准差
@@ -53,4 +54,3 @@ class GraphConvolution(Module):
         if self.bias is not None:
             output += self.bias  # 如果有偏置，加上偏置
         return output  # 返回输出
-

@@ -152,7 +152,7 @@ def process_ns3_data(df):
     # 步骤2：为每个节点分配一个唯一的ID
     # 获取所有节点（ListenerNode和SrcNodeId的并集）
     nodes = pd.concat([df['ListenerNode'], df['SrcNodeId']]).unique()
-    node_map = {node: i for i, node in enumerate(nodes)}  # 为每个节点分配一个唯一的ID
+    # node_map = {node: i for i, node in enumerate(nodes)}  # 为每个节点分配一个唯一的ID
 
     # 步骤3：构建超边（每个目标节点（被监听节点）对应一个超边，包含所有与该节点相关的源节点）
     hyperedges = {}  # 用字典存储每个目标节点对应的所有源节点（超边）
@@ -184,7 +184,6 @@ def process_ns3_data(df):
     hyper_edge_id = 0
     for src_node, edges in hyperedges.items():
         # 每个源节点（被监听节点）对应一个超边
-        hyper_edge_id = hyper_edge_id + 1
         for ori_edge_id in edges:
             edge_index.append([hyper_edge_id, ori_edge_id])  # 每条边连接同一个原始边ID的节点
             # 将该边对应的特征（第二组特征）添加到超图节点特征中
@@ -192,6 +191,7 @@ def process_ns3_data(df):
             hyper_node_feature = node_features[ori_edge_id]  # 监听节点的特征，此处包含链路特征
             hypernode_features.append(hyper_node_feature)  # 将监听节点的特征添加到超图节点特征中
             hyper_edge_ids.append(hyper_edge_id)  # 记录边的ID作为超图节点ID
+        hyper_edge_id = hyper_edge_id + 1
 
     # 步骤6：计算每个超边的相似度矩阵
     edge_weights = []  # 用于存储每个超边的相似度矩阵
@@ -230,6 +230,7 @@ def process_ns3_data(df):
 
     # 步骤7：将边和节点特征转化为PyTorch张量
     edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+    edge_index = edge_index[[1, 0]]
     hypernode_features = torch.stack(hypernode_features)  # 将节点特征堆叠成一个矩阵
     edge_ids = torch.tensor(hyper_edge_ids, dtype=torch.long)  # 边的ID（原始边ID）
     hyperedge_weights = torch.tensor(hyperedge_weights)

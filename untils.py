@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 import re
+import torch
+from sklearn.model_selection import train_test_split
+from torch_geometric.data import Data
 
 
 def parse_log_file(log_file, time_interval):
@@ -51,7 +54,7 @@ def parse_log_file(log_file, time_interval):
     }
 
 
-def process_csv(input_file, output_file, log_file, time_interval=10.0):
+def process_csv(input_file, output_file, log_file, time_interval=2.50):
     # 读取 CSV 文件
     df = pd.read_csv(input_file)
     print(df.columns)  # 查看列名
@@ -91,7 +94,6 @@ def process_csv(input_file, output_file, log_file, time_interval=10.0):
                 route_reply_ack_count = packet_counts.get('Route Replay ACK', 0)
                 ack_count = packet_counts.get('ACK', 0)
 
-
                 # 获取当前时间段丢包次数
                 drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(src_node_id, 0)
 
@@ -119,7 +121,8 @@ def process_csv(input_file, output_file, log_file, time_interval=10.0):
                     'IsMaliciousNode': is_malicious,
                     'IsBlackholeNode': is_blackhole,
                     'IsSelectiveForwardingNode': is_selective_forwarding,
-                    'TimeSegment': time_segment
+                    'TimeSegment': time_segment,
+                    'TimeID': int(time_segment / time_interval)
                 })
 
     # 将结果转换为 DataFrame
@@ -127,3 +130,106 @@ def process_csv(input_file, output_file, log_file, time_interval=10.0):
 
     # 保存结果到 CSV 文件
     result_df.to_csv(output_file, index=False)
+
+
+def process_ns3_data(df):
+    # 步骤1：提取节点的特征
+    # 第一组特征：UDPCount, ARPRequestCount, ARPReplayCount, RouteRequestCount, RouteReplayCount, RouteErrorCount, RouteReplayACKCount, ACKCount
+    node_features_group_2 = df[['UDPCount', 'ARPRequestCount', 'ARPReplayCount',
+                                'RouteRequestCount', 'RouteReplayCount', 'RouteErrorCount',
+                                'RouteReplayACKCount', 'ACKCount']].values
+    node_features_group_2 = torch.tensor(node_features_group_2, dtype=torch.float)
+
+    # 第二组特征：AvgSNR, AvgSignalPower, AvgNoisePower
+    node_features_group_1 = df[['AvgSNR', 'AvgSignalPower', 'AvgNoisePower']].values
+    node_features_group_1 = torch.tensor(node_features_group_1, dtype=torch.float)
+
+    # 合并这两组特征
+    node_features = torch.cat([node_features_group_1, node_features_group_2], dim=1)
+
+    # 步骤2：为每个节点分配一个唯一的ID
+    # 获取所有节点（ListenerNode和SrcNodeId的并集）
+    nodes = pd.concat([df['ListenerNode'], df['SrcNodeId']]).unique()
+    node_map = {node: i for i, node in enumerate(nodes)}  # 为每个节点分配一个唯一的ID
+
+    # 步骤3：构建超边（每个目标节点（被监听节点）对应一个超边，包含所有与该节点相关的源节点）
+    hyperedges = {}  # 用字典存储每个目标节点对应的所有源节点（超边）
+
+    # 步骤4：为每条边分配唯一的ID
+    edge_map = {}  # 用于存储边的唯一ID
+
+    edge_id_counter = 0  # 边ID计数器
+
+    for _, row in df.iterrows():
+        listener_node = row['ListenerNode']  # 监听节点
+        src_node = row['SrcNodeId']  # 被监听节点
+        edge = (src_node, listener_node)  # 边由被监听节点和监听节点组成
+
+        if edge not in edge_map:
+            edge_map[edge] = edge_id_counter  # 为该边分配唯一ID
+            edge_id_counter += 1
+
+        # 将监听节点加入到对应的被监听节点的超边中
+        if src_node not in hyperedges:
+            hyperedges[src_node] = []
+        hyperedges[src_node].append(edge_map[edge])  # 将边的ID加入超边中
+
+    # 步骤5：构建超图中的边和节点特征
+    edge_index = []  # 存储超边中的节点连接关系
+    hypernode_features = []  # 存储每个节点的特征
+    hyper_edge_ids = []  # 存储每条边的ID（即超图节点ID）
+
+    hyper_edge_id = 0
+    for src_node, edges in hyperedges.items():
+        # 每个源节点（被监听节点）对应一个超边
+        hyper_edge_id = hyper_edge_id + 1
+        for ori_edge_id in edges:
+            edge_index.append([hyper_edge_id, ori_edge_id])  # 每条边连接同一个原始边ID的节点
+            # 将该边对应的特征（第二组特征）添加到超图节点特征中
+
+            hyper_node_feature = node_features_group_2[ori_edge_id]  # 监听节点的特征
+            hypernode_features.append(hyper_node_feature)  # 将监听节点的特征添加到超图节点特征中
+            hyper_edge_ids.append(hyper_edge_id)  # 记录边的ID作为超图节点ID
+
+    # 将边和节点特征转化为PyTorch张量
+    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+    hypernode_features = torch.stack(hypernode_features)  # 将节点特征堆叠成一个矩阵
+    edge_ids = torch.tensor(hyper_edge_ids, dtype=torch.long)  # 边的ID（原始边ID）
+
+    # 步骤6：标签提取（IsMaliciousNode）
+    labels = df['IsMaliciousNode'].map({0: 0, 1: 1}).values
+    labels_tensor = torch.tensor(labels, dtype=torch.long)
+
+    # 步骤7：数据集划分（训练集、验证集、测试集）
+    train_idx, test_val_idx = train_test_split(np.arange(len(labels)), test_size=0.3, random_state=42)
+    val_idx, test_idx = train_test_split(test_val_idx, test_size=0.5, random_state=42)
+
+    train_mask = torch.zeros(len(labels), dtype=torch.bool)
+    train_mask[train_idx] = 1
+
+    val_mask = torch.zeros(len(labels), dtype=torch.bool)
+    val_mask[val_idx] = 1
+
+    test_mask = torch.zeros(len(labels), dtype=torch.bool)
+    test_mask[test_idx] = 1
+
+    # 步骤8：返回PyG数据对象
+    data = Data(x=hypernode_features, edge_index=edge_index, y=labels_tensor,
+                train_mask=train_mask, val_mask=val_mask, test_mask=test_mask,
+                edge_ids=edge_ids)  # 添加边ID作为超图节点ID
+
+    return data
+
+
+# def process_wwsn_data(df):
+
+
+def load_data(data_type, data_file):
+    if data_type == 1:  # ns3仿真数据
+        df = pd.read_csv(data_file)
+        processed_data = process_ns3_data(df[0:1000])
+    # elif data_type == 0:  # wwsn实验数据
+    #     df = pd.read_csv(data_file)
+    #     processed_data = process_wwsn_data(df)
+
+    return processed_data

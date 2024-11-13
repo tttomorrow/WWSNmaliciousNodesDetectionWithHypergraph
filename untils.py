@@ -4,6 +4,7 @@ import re
 import torch
 from sklearn.model_selection import train_test_split
 from torch_geometric.data import Data
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 def parse_log_file(log_file, time_interval):
@@ -135,14 +136,15 @@ def process_csv(input_file, output_file, log_file, time_interval=2.50):
 def process_ns3_data(df):
     # 步骤1：提取节点的特征
     # 第一组特征：UDPCount, ARPRequestCount, ARPReplayCount, RouteRequestCount, RouteReplayCount, RouteErrorCount, RouteReplayACKCount, ACKCount
-    node_features_group_2 = df[['UDPCount', 'ARPRequestCount', 'ARPReplayCount',
+    node_features_group_1 = df[['UDPCount', 'ARPRequestCount', 'ARPReplayCount',
                                 'RouteRequestCount', 'RouteReplayCount', 'RouteErrorCount',
                                 'RouteReplayACKCount', 'ACKCount']].values
-    node_features_group_2 = torch.tensor(node_features_group_2, dtype=torch.float)
+    node_features_group_1 = torch.tensor(node_features_group_1, dtype=torch.float)
+    num_feature1 = node_features_group_1.size(1)
 
     # 第二组特征：AvgSNR, AvgSignalPower, AvgNoisePower
-    node_features_group_1 = df[['AvgSNR', 'AvgSignalPower', 'AvgNoisePower']].values
-    node_features_group_1 = torch.tensor(node_features_group_1, dtype=torch.float)
+    node_features_group_2 = df[['AvgSNR', 'AvgSignalPower', 'AvgNoisePower']].values
+    node_features_group_2 = torch.tensor(node_features_group_2, dtype=torch.float)
 
     # 合并这两组特征
     node_features = torch.cat([node_features_group_1, node_features_group_2], dim=1)
@@ -187,36 +189,60 @@ def process_ns3_data(df):
             edge_index.append([hyper_edge_id, ori_edge_id])  # 每条边连接同一个原始边ID的节点
             # 将该边对应的特征（第二组特征）添加到超图节点特征中
 
-            hyper_node_feature = node_features_group_2[ori_edge_id]  # 监听节点的特征
+            hyper_node_feature = node_features[ori_edge_id]  # 监听节点的特征，此处包含链路特征
             hypernode_features.append(hyper_node_feature)  # 将监听节点的特征添加到超图节点特征中
             hyper_edge_ids.append(hyper_edge_id)  # 记录边的ID作为超图节点ID
 
-    # 将边和节点特征转化为PyTorch张量
+    # 步骤6：计算每个超边的相似度矩阵
+    edge_weights = []  # 用于存储每个超边的相似度矩阵
+
+    data_edge_index = np.array(edge_index)  # 将 edge_index 转化为 NumPy 数组
+
+    grouped = {}  # 提取第一个值相同的第二个值
+
+    # 遍历数据，按第一个值分组
+    for pair in data_edge_index:
+        key = pair[0]
+        value = pair[1]
+        if key not in grouped:
+            grouped[key] = []
+        grouped[key].append(value)
+
+    grouped_result = []  # 创建二维数组，保存每个组的第二个值
+
+    for key in sorted(grouped.keys()):  # 将每个组的第二个值作为一维数组添加到结果中
+        grouped_result.append(grouped[key])
+
+    # 将结果转换为 NumPy 数组，最终是一个二维数组
+    grouped_result = np.array(grouped_result, dtype=object)  # 使用 dtype=object 来支持不等长的列表
+
+    np_hypernode_features = np.array(hypernode_features)  # 转换为 NumPy 数组
+    for i in range(grouped_result.size):
+        index = np.array(grouped_result[i - 1])
+        similarity_matrix = cosine_similarity(np_hypernode_features[index, 0: num_feature1 - 1],
+                                              np_hypernode_features[index, 0: num_feature1 - 1])
+        similarity_matrix = torch.tensor(similarity_matrix, dtype=torch.float)
+        row_sum = similarity_matrix.sum(dim=0, keepdim=True)
+        edge_weights.append(row_sum / row_sum.sum(dim=1))
+
+    # 计算每个张量的均值，并将其存储为边权重
+    hyperedge_weights = [tensor.mean().item() for tensor in edge_weights]
+
+    # 步骤7：将边和节点特征转化为PyTorch张量
     edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
     hypernode_features = torch.stack(hypernode_features)  # 将节点特征堆叠成一个矩阵
     edge_ids = torch.tensor(hyper_edge_ids, dtype=torch.long)  # 边的ID（原始边ID）
+    hyperedge_weights = torch.tensor(hyperedge_weights)
+    hyperedge_weights = torch.nan_to_num(hyperedge_weights, nan=0.0)  # 使用 torch.nan_to_num() 将 NaN 替换为 0
 
-    # 步骤6：标签提取（IsMaliciousNode）
+
+    # 步骤8：标签提取（IsMaliciousNode）
     labels = df['IsMaliciousNode'].map({0: 0, 1: 1}).values
     labels_tensor = torch.tensor(labels, dtype=torch.long)
 
-    # 步骤7：数据集划分（训练集、验证集、测试集）
-    train_idx, test_val_idx = train_test_split(np.arange(len(labels)), test_size=0.3, random_state=42)
-    val_idx, test_idx = train_test_split(test_val_idx, test_size=0.5, random_state=42)
-
-    train_mask = torch.zeros(len(labels), dtype=torch.bool)
-    train_mask[train_idx] = 1
-
-    val_mask = torch.zeros(len(labels), dtype=torch.bool)
-    val_mask[val_idx] = 1
-
-    test_mask = torch.zeros(len(labels), dtype=torch.bool)
-    test_mask[test_idx] = 1
-
-    # 步骤8：返回PyG数据对象
+    # 步骤10：返回PyG数据对象
     data = Data(x=hypernode_features, edge_index=edge_index, y=labels_tensor,
-                train_mask=train_mask, val_mask=val_mask, test_mask=test_mask,
-                edge_ids=edge_ids)  # 添加边ID作为超图节点ID
+                edge_ids=edge_ids, edge_weights=hyperedge_weights)  # 添加边ID作为超图节点ID，返回的x包含链路特征，特征最后三列
 
     return data
 

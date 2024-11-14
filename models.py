@@ -18,8 +18,7 @@ class HypergraphModel(nn.Module):
         self.class_classifier = nn.Sequential(nn.Linear(32, 32),
                                               nn.ReLU(),
                                               # nn.Dropout(p=self.dropout),
-                                              nn.Linear(32, 2),
-                                              nn.Softmax(dim=1))
+                                              nn.Linear(32, 2))
         self.norm1 = CustomBatchNorm(num_features, 64)
         self.norm2 = CustomBatchNorm(32, 32)
         self.norm3 = CustomBatchNorm(edge_features_size, edge_features_size)
@@ -71,6 +70,6 @@ class HypergraphModel(nn.Module):
             nodes_features.append(nodes_feature)
 
         # 将每条超边的特征堆叠成一个矩阵，形状为 (num_nodes, feature_dim)
-        nodes_features = torch.stack(nodes_features, dim=0)
+        stack_nodes_features = torch.stack(nodes_features, dim=0)
 
-        return nodes_features
+        return stack_nodes_features

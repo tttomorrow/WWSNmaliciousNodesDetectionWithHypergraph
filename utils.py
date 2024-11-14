@@ -143,7 +143,7 @@ def process_ns3_data(df):
     node_features_group_1 = df[['UDPCount', 'ARPRequestCount', 'ARPReplayCount',
                                 'RouteRequestCount', 'RouteReplayCount', 'RouteErrorCount',
                                 'RouteReplayACKCount', 'ACKCount']].values
-    node_features_group_1 = torch.tensor(node_features_group_1, dtype=torch.float)
+    node_features_group_1 = torch.tensor(node_features_group_1, dtype=torch.int)
     num_feature1 = node_features_group_1.size(1)
 
     # 第二组特征：AvgSNR, AvgSignalPower, AvgNoisePower
@@ -259,12 +259,15 @@ def process_ns3_data(df):
 
     # 将结果转换为 NumPy 数组，最终是一个二维数组
     grouped_result = np.array(grouped_result, dtype=object)  # 使用 dtype=object 来支持不等长的列表
-
+    print(hypernode_features)
     np_hypernode_features = np.array(hypernode_features)  # 转换为 NumPy 数组
+    print(np_hypernode_features.shape)
     for i in range(grouped_result.size):
         index = np.array(grouped_result[i - 1])
-        similarity_matrix = cosine_similarity(np_hypernode_features[index, 0: num_feature1 - 1],
-                                              np_hypernode_features[index, 0: num_feature1 - 1])
+        np_hypernode_behavior_features = np_hypernode_features[index][0: num_feature1 - 1]
+        print(np_hypernode_behavior_features)
+        similarity_matrix = cosine_similarity(np_hypernode_behavior_features,
+                                              np_hypernode_behavior_features)
         similarity_matrix = torch.tensor(similarity_matrix, dtype=torch.float)
         row_sum = similarity_matrix.sum(dim=0, keepdim=True)
         edge_weights.append(row_sum / row_sum.sum(dim=1))
@@ -290,7 +293,7 @@ def process_ns3_data(df):
     labels = df_sorted['IsMaliciousNode'].values
 
     # 转换为 PyTorch tensor 格式
-    labels_tensor = torch.tensor(labels, dtype=torch.float)
+    labels_tensor = torch.tensor(labels, dtype=torch.long)
 
     # 步骤10：返回PyG数据对象
     data = Data(x=hypernode_features, edge_index=edge_index, y=labels_tensor,
@@ -399,7 +402,7 @@ def normalize(mx):
 def load_data(data_type, data_file):
     if data_type == 1:  # ns3仿真数据
         df = pd.read_csv(data_file)
-        processed_data, adj, T, group_num = process_ns3_data_by_timeid(df)
+        processed_data, adj, T, group_num = process_ns3_data_by_timeid(df[0:1000])
     # elif data_type == 0:  # wwsn实验数据
     #     df = pd.read_csv(data_file)
     #     processed_data = process_wwsn_data(df)

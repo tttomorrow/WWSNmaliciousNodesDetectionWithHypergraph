@@ -6,7 +6,6 @@ from torch.nn.parameter import Parameter
 from torch.nn.modules.module import Module
 from torch_geometric.nn import HypergraphConv  # 导入超图卷积层的实现
 
-
 # 定义超图卷积层
 class HypergraphConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels):

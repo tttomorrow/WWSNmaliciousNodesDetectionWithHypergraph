@@ -3,7 +3,6 @@ import numpy as np
 import re
 import torch
 import networkx as nx
-from sklearn.model_selection import train_test_split
 from torch_geometric.data import Data
 from sklearn.metrics.pairwise import cosine_similarity
 import scipy.sparse as sp
@@ -259,15 +258,13 @@ def process_ns3_data(df):
 
     # 将结果转换为 NumPy 数组，最终是一个二维数组
     grouped_result = np.array(grouped_result, dtype=object)  # 使用 dtype=object 来支持不等长的列表
-    print(hypernode_features)
     np_hypernode_features = np.array(hypernode_features)  # 转换为 NumPy 数组
-    print(np_hypernode_features.shape)
+
     for i in range(grouped_result.size):
-        index = np.array(grouped_result[i - 1])
-        np_hypernode_behavior_features = np_hypernode_features[index][0: num_feature1 - 1]
-        print(np_hypernode_behavior_features)
-        similarity_matrix = cosine_similarity(np_hypernode_behavior_features,
-                                              np_hypernode_behavior_features)
+        index = np.array(grouped_result[i])
+        # print(np_hypernode_features[index, 0: num_feature1 - 1].shape)
+        similarity_matrix = cosine_similarity(np_hypernode_features[index, 0: num_feature1 - 1],
+                                              np_hypernode_features[index, 0: num_feature1 - 1])
         similarity_matrix = torch.tensor(similarity_matrix, dtype=torch.float)
         row_sum = similarity_matrix.sum(dim=0, keepdim=True)
         edge_weights.append(row_sum / row_sum.sum(dim=1))

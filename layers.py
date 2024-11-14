@@ -45,7 +45,7 @@ class GraphConvolution(Module):
             self.bias.data.uniform_(-stdv, stdv)  # 初始化偏置
 
     def forward(self, H_v, edge_features, adj_v, T):
-        print(self.p.shape)
+        # print(self.p.shape)
         multiplier = torch.spmm(T, torch.diag((edge_features @ self.p.t()).t()[0])) @ T.to_dense().t()
         mask = torch.eye(multiplier.shape[0])
 
@@ -63,3 +63,41 @@ class GraphConvolution(Module):
         if self.bias is not None:
             output = output + self.bias
         return output  # 返回输出
+
+
+class CustomBatchNorm(nn.Module):
+    def __init__(self, num_features, eps=1e-5, momentum=0.1):
+        super(CustomBatchNorm, self).__init__()
+
+        self.num_features = num_features
+        self.eps = eps  # 防止除零错误
+        self.momentum = momentum  # 更新均值和方差的动量
+
+        # 可学习的参数
+        self.gamma = nn.Parameter(torch.ones(num_features))  # 缩放参数
+        self.beta = nn.Parameter(torch.zeros(num_features))  # 偏移参数
+
+        # 均值和方差的移动平均
+        self.running_mean = torch.zeros(num_features)
+        self.running_var = torch.ones(num_features)
+
+    def forward(self, x):
+        # 在训练模式下，计算均值和方差；在推理模式下，使用移动平均
+        if self.training:
+            # 计算当前batch的均值和方差
+            batch_mean = x.mean(dim=0)
+            batch_var = x.var(dim=0, unbiased=False)
+
+            # 使用移动平均更新均值和方差
+            self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
+            self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var
+        else:
+            batch_mean = self.running_mean
+            batch_var = self.running_var
+
+        # 标准化
+        x_normalized = (x - batch_mean) / torch.sqrt(batch_var + self.eps)
+
+        # 缩放和偏移
+        out = self.gamma * x_normalized + self.beta
+        return out

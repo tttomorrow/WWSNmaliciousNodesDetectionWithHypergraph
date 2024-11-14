@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
-from layers import HypergraphConvLayer, GraphConvolution
+
+from layers import HypergraphConvLayer, GraphConvolution, CustomBatchNorm
+
+
 
 
 # 定义整体超图模型
@@ -17,18 +20,24 @@ class HypergraphModel(nn.Module):
                                               # nn.Dropout(p=self.dropout),
                                               nn.Linear(32, 2),
                                               nn.Softmax(dim=1))
+        self.norm1 = CustomBatchNorm(num_features, 64)
+        self.norm2 = CustomBatchNorm(32, 32)
+        self.norm3 = CustomBatchNorm(edge_features_size, edge_features_size)
+
 
     def forward(self, x, edge_index, edge_weight, edge_features, adj_e, T):
         # 前向传播函数，输入为节点特征、超边连接、超边权重和边特征
+        x = self.norm1(x)
         x = self.layer1(x, edge_index, edge_weight)  # 通过第一个超图卷积层
         x = torch.relu(x)  # 激活函数
         x = self.layer2(x, edge_index, edge_weight)  # 通过第二个超图卷积层
+        x = self.norm2(x)
         x = torch.relu(x)  # 激活函数
 
         # 聚合节点特征
         node_features = self.aggregate_node_features(x, edge_index)  # 聚合超图卷积得到的节点特征
-        print('node_features.shape')
-        print(node_features.shape)
+
+        edge_features = self.norm3(edge_features)
         shared_feature = self.edge_conv(node_features, edge_features, adj_e, T)  # 将边特征融合到节点特征中
 
         # 分类结果

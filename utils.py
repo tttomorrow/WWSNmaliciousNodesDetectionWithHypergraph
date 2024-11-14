@@ -60,7 +60,7 @@ def parse_log_file(log_file, time_interval):
 def process_csv(input_file, output_file, log_file, time_interval=2.50):
     # 读取 CSV 文件
     df = pd.read_csv(input_file)
-    print(df.columns)  # 查看列名
+    # print(df.columns)  # 查看列名
 
     # 解析日志文件
     log_data = parse_log_file(log_file, time_interval)
@@ -170,7 +170,7 @@ def process_ns3_data(df):
         graph[src_node].append(listener_node)
 
     total_edges = sum(len(neighbors) for neighbors in graph.values())
-    print(f"Total number of edges (directed graph): {total_edges}")
+    # print(f"Total number of edges (directed graph): {total_edges}")
     # 使用 networkx 创建有向图
     G = nx.DiGraph()  # 使用 DiGraph 来创建有向图
 
@@ -290,7 +290,7 @@ def process_ns3_data(df):
     labels = df_sorted['IsMaliciousNode'].values
 
     # 转换为 PyTorch tensor 格式
-    labels_tensor = torch.tensor(labels, dtype=torch.long)
+    labels_tensor = torch.tensor(labels, dtype=torch.float)
 
     # 步骤10：返回PyG数据对象
     data = Data(x=hypernode_features, edge_index=edge_index, y=labels_tensor,
@@ -311,9 +311,9 @@ def process_ns3_data_by_timeid(df):
     T_per_timeid = []
 
     for timeid, group in timeid_groups:
-        data, eadj, T = process_ns3_data(group)
+        data, adj, T = process_ns3_data(group)
         data_per_timeid.append(data)
-        adj_per_timeid.append(eadj)
+        adj_per_timeid.append(adj)
         T_per_timeid.append(T)
 
     return data_per_timeid, adj_per_timeid, T_per_timeid, len(timeid_groups)
@@ -399,12 +399,12 @@ def normalize(mx):
 def load_data(data_type, data_file):
     if data_type == 1:  # ns3仿真数据
         df = pd.read_csv(data_file)
-        processed_data, e_adj, T, group_num = process_ns3_data_by_timeid(df[0:1000])
+        processed_data, adj, T, group_num = process_ns3_data_by_timeid(df)
     # elif data_type == 0:  # wwsn实验数据
     #     df = pd.read_csv(data_file)
     #     processed_data = process_wwsn_data(df)
 
-    return processed_data, e_adj, T, group_num
+    return processed_data, adj, T, group_num
 
 def accuracy(output, labels):
     preds = output.max(1)[1].type_as(labels)

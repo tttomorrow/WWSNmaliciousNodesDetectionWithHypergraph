@@ -31,6 +31,12 @@ class HypergraphModel(nn.Module):
         node_features = self.aggregate_node_features(x, edge_index)  # 聚合超图卷积得到的节点特征
         print('node_features.shape')
         print(node_features.shape)
+        print('edge_features.shape')
+        print(edge_features.shape)
+        print('adj_e.shape')
+        print(adj_e.shape)
+        print('T.shape')
+        print(T.shape)
         shared_feature = self.edge_conv(node_features, edge_features, adj_e, T)  # 将边特征融合到节点特征中
 
         # 分类结果

@@ -35,7 +35,7 @@ class GraphConvolution(Module):
         else:
             self.register_parameter('bias', None)  # 如果不使用偏置项，注册为None
         self.reset_parameters()  # 重置参数
-        self.p = Parameter(torch.from_numpy(np.random.normal(size=(1, in_features_v))).float())
+        self.p = Parameter(torch.from_numpy(np.random.normal(size=(1, 3))).float())
 
     def reset_parameters(self):
         # 使用均匀分布初始化权重和偏置
@@ -45,13 +45,18 @@ class GraphConvolution(Module):
             self.bias.data.uniform_(-stdv, stdv)  # 初始化偏置
 
     def forward(self, H_v, edge_features, adj_e, T):
-
-        multiplier = torch.spmm(T.t(), torch.diag((H_v @ self.p.t()).t()[0])) @ T.to_dense()
+        print(self.p.shape)
+        multiplier = torch.spmm(T, torch.diag((edge_features @ self.p.t()).t()[0])) @ T.to_dense().t()
         mask = torch.eye(multiplier.shape[0])
         M = mask * torch.ones(multiplier.shape[0]) + (1. - mask) * multiplier
         adjusted_A = torch.mul(M, adj_e.to_dense())
+        '''
+        print("adjusted_A is ", adjusted_A)
         normalized_adjusted_A = adjusted_A / adjusted_A.max(0, keepdim=True)[0]
-        output = torch.mm(normalized_adjusted_A, torch.mm(edge_features, self.weight))
+        print("normalized adjusted A is ", normalized_adjusted_A)
+        '''
+        # to avoid missing feature's influence, we don't normalize the A
+        output = torch.mm(adjusted_A, torch.mm(H_v, self.weight))
         if self.bias is not None:
-            output += self.bias  # 如果有偏置，加上偏置
+            output = output + self.bias
         return output  # 返回输出

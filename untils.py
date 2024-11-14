@@ -153,7 +153,7 @@ def process_ns3_data(df):
     # 合并这两组特征
     node_features = torch.cat([node_features_group_1, node_features_group_2], dim=1)
 
-    # 步骤2：构建图结构：用一个字典来表示图，键为节点，值为邻接节点
+    # 步骤2：构建有向图结构：用一个字典来表示图，键为节点，值为邻接节点
     graph = {}  # 用于存储图的邻接信息
 
     for _, row in df.iterrows():
@@ -168,12 +168,18 @@ def process_ns3_data(df):
 
         # 双向边关系（由于假设每个监听节点和被监听节点互为邻接）
         graph[src_node].append(listener_node)
-        graph[listener_node].append(src_node)
 
-    # 使用 networkx 将字典转换为图对象
-    G = nx.from_dict_of_lists(graph)
+    total_edges = sum(len(neighbors) for neighbors in graph.values())
+    print(f"Total number of edges (directed graph): {total_edges}")
+    # 使用 networkx 创建有向图
+    G = nx.DiGraph()  # 使用 DiGraph 来创建有向图
 
-    # 获取邻接矩阵
+    # 将邻接表字典添加到图中
+    for node, neighbors in graph.items():
+        for neighbor in neighbors:
+            G.add_edge(node, neighbor)
+
+    # 获取邻接矩阵（有向图）
     adj = nx.adjacency_matrix(G)
 
     # 步骤3：构建超边（每个目标节点（被监听节点）对应一个超边，包含所有与该节点相关的源节点）
@@ -199,31 +205,19 @@ def process_ns3_data(df):
             hyperedges[src_node] = []
         hyperedges[src_node].append(edge_map[edge])  # 将边的ID加入超边中
 
-    #     edge_id = edge_map[edge]
-    #     # 在邻接矩阵中记录边与边的连接关系
-    #     # 检查所有已经遍历过的边
-    #     for existing_edge_id in range(num_edges):
-    #         if edge_id != existing_edge_id:  # 排除自身连接
-    #             existing_row = df.iloc[existing_edge_id]
-    #             existing_src_node = existing_row['SrcNodeId']
-    #             existing_listener_node = existing_row['ListenerNode']
-    #
-    #             # 如果两条边共享相同的源节点或目的节点，则认为它们相邻
-    #             if (src_node == existing_src_node) or (listener_node == existing_listener_node) or \
-    #                     (listener_node == existing_src_node) or (src_node == existing_listener_node):
-    #                 edge_adjacency[edge_id, existing_edge_id] = 1
-    #                 edge_adjacency[existing_edge_id, edge_id] = 1  # 确保对称性
-    #
-    #  # 将邻接矩阵转换为 PyTorch 张量
-    # edge_adjacency = torch.tensor(edge_adjacency, dtype=torch.float)
-    # # print(edge_adjacency)
-
+    # print('adj.shape')
+    # print(adj.shape)
     # create transform matrix T, dimension is num_node * num_edge in the graph
     T = create_transition_matrix(adj)
+    # print('T.shape')
+    # print(T.shape)
     T = sparse_mx_to_torch_sparse_tensor(T)
-
+    # print('T.shape')
+    # print(T.shape)
     # create edge adjacent matrix from node/vertex adjacent matrix
     eadj, edge_name = create_edge_adj(adj)
+    # print('eadj.shape')
+    # print(eadj.shape)
     eadj = sparse_mx_to_torch_sparse_tensor(normalize(eadj))
 
     # 步骤5：构建超图中的边和节点特征
@@ -326,53 +320,59 @@ def process_ns3_data_by_timeid(df):
 # def process_wwsn_data(df):
 
 
-def load_data(data_type, data_file):
-    if data_type == 1:  # ns3仿真数据
-        df = pd.read_csv(data_file)
-        processed_data, e_adj, T, group_num = process_ns3_data_by_timeid(df[0:1000])
-    # elif data_type == 0:  # wwsn实验数据
-    #     df = pd.read_csv(data_file)
-    #     processed_data = process_wwsn_data(df)
-
-    return processed_data, e_adj, T, group_num
-
-
 def create_edge_adj(vertex_adj):
-    '''
-    create an edge adjacency matrix from vertex adjacency matrix
-    '''
-    vertex_adj.setdiag(0)
-    edge_index = np.nonzero(sp.triu(vertex_adj, k=1))
-    num_edge = int(len(edge_index[0]))
-    edge_name = [x for x in zip(edge_index[0], edge_index[1])]
 
+    # 获取邻接矩阵中所有非零元素的索引，表示图中存在的边
+    edge_index = np.nonzero(vertex_adj)
+
+    # 计算边的数量
+    num_edge = len(edge_index[0])
+
+    # 创建一个边名列表，每个元素是一个二元组 (src_node, tgt_node)，表示有向边
+    edge_name = [(edge_index[0][i], edge_index[1][i]) for i in range(num_edge)]
+
+    # 初始化一个大小为 num_edge x num_edge 的边邻接矩阵
     edge_adj = np.zeros((num_edge, num_edge))
+
+    # 遍历所有边对，检查是否存在共同的节点（无论是源节点还是目标节点）
     for i in range(num_edge):
         for j in range(i, num_edge):
-            if len(set(edge_name[i]) & set(edge_name[j])) == 0:
-                edge_adj[i, j] = 0
-            else:
+            # 如果边 i 和 边 j 有共同的节点，则这两条边是相连的
+            if len(set(edge_name[i]) & set(edge_name[j])) > 0:
                 edge_adj[i, j] = 1
-    adj = edge_adj + edge_adj.T
-    np.fill_diagonal(adj, 1)
-    return sp.csr_matrix(adj), edge_name
+
+    # 返回的邻接矩阵需要是稀疏矩阵，使用 csr_matrix 来节省内存
+    adj = sp.csr_matrix(edge_adj)
+
+    # 返回边邻接矩阵和边列表
+    return adj, edge_name
 
 
 def create_transition_matrix(vertex_adj):
     '''create N_v * N_e transition matrix'''
-    vertex_adj.setdiag(0)
-    edge_index = np.nonzero(sp.triu(vertex_adj, k=1))
-    num_edge = int(len(edge_index[0]))
-    edge_name = [x for x in zip(edge_index[0], edge_index[1])]
+    # 不去除自环，确保所有边都被计入
+    # vertex_adj.setdiag(0)  # 这行可以注释掉，如果不想移除自环
 
-    row_index = [i for sub in edge_name for i in sub]
-    col_index = np.repeat([i for i in range(num_edge)], 2)
+    # 获取邻接矩阵中所有的非零元素，即边的索引
+    edge_index = np.nonzero(vertex_adj)  # 获取所有边的索引
+    num_edge = len(edge_index[0])  # 边的数量
 
-    data = np.ones(num_edge * 2)
-    T = sp.csr_matrix((data, (row_index, col_index)),
-                      shape=(vertex_adj.shape[0], num_edge))
+    # 输出边的数量
+    # print('Number of edges:', num_edge)
 
-    return T
+    # 创建一个二值矩阵 T，大小是节点数 x 边数
+    # T[i, m] = 1 如果节点 i 参与边 m，0 否则
+    T = np.zeros((vertex_adj.shape[0], num_edge), dtype=int)
+
+    # 填充 T 矩阵
+    for m, (src, tgt) in enumerate(zip(edge_index[0], edge_index[1])):
+        T[src, m] = 1  # 源节点连接到边 m
+        T[tgt, m] = 1  # 目标节点也连接到边 m（如果需要）
+
+    # 将 T 转换为稀疏矩阵格式（如果需要节省内存）
+    T_sparse = sp.csr_matrix(T)
+
+    return T_sparse
 
 
 def sparse_mx_to_torch_sparse_tensor(sparse_mx):
@@ -393,3 +393,14 @@ def normalize(mx):
     r_mat_inv = sp.diags(r_inv)
     mx = r_mat_inv.dot(mx)
     return mx
+
+def load_data(data_type, data_file):
+    if data_type == 1:  # ns3仿真数据
+        df = pd.read_csv(data_file)
+        processed_data, e_adj, T, group_num = process_ns3_data_by_timeid(df[0:1000])
+    # elif data_type == 0:  # wwsn实验数据
+    #     df = pd.read_csv(data_file)
+    #     processed_data = process_wwsn_data(df)
+
+    return processed_data, e_adj, T, group_num
+

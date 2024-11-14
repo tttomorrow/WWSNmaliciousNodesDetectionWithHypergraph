@@ -406,3 +406,8 @@ def load_data(data_type, data_file):
 
     return processed_data, e_adj, T, group_num
 
+def accuracy(output, labels):
+    preds = output.max(1)[1].type_as(labels)
+    correct = preds.eq(labels).double()
+    correct = correct.sum()
+    return correct / len(labels)

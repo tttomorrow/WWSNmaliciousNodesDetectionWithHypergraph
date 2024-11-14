@@ -24,19 +24,11 @@ class HypergraphModel(nn.Module):
         x = torch.relu(x)  # 激活函数
         x = self.layer2(x, edge_index, edge_weight)  # 通过第二个超图卷积层
         x = torch.relu(x)  # 激活函数
-        print('x.shape')
-        print(x.shape)
 
         # 聚合节点特征
         node_features = self.aggregate_node_features(x, edge_index)  # 聚合超图卷积得到的节点特征
         print('node_features.shape')
         print(node_features.shape)
-        print('edge_features.shape')
-        print(edge_features.shape)
-        print('adj_e.shape')
-        print(adj_e.shape)
-        print('T.shape')
-        print(T.shape)
         shared_feature = self.edge_conv(node_features, edge_features, adj_e, T)  # 将边特征融合到节点特征中
 
         # 分类结果
@@ -44,14 +36,32 @@ class HypergraphModel(nn.Module):
 
         return class_output  # 返回最终输出
 
-    def aggregate_node_features(self, x, edge_index):
-        # 聚合节点特征的函数
-        num_nodes = x.size(0)  # 节点数量
-        node_features = torch.zeros(num_nodes, x.size(1), device=x.device)  # 初始化聚合后的节点特征
+    def aggregate_node_features(self, x, edge_index, aggregation_type='mean'):
+        num_edges = len(edge_index[1].unique())  # 超边数量
 
-        # 遍历每条超边，进行特征聚合
-        for i in range(edge_index.size(1)):
-            src, dst = edge_index[0, i], edge_index[1, i]  # 获取超边的源节点和目标节点
-            node_features[dst] += x[src]  # 将源节点的特征加到目标节点上
+        nodes_features = []  # 用于存储每条超边的特征
 
-        return node_features / edge_index.size(1)  # 返回平均后的节点特征（可选）
+        for edge_id in range(num_edges):
+            # 获取当前超边连接的所有节点ID
+            connected_nodes = edge_index[0, edge_index[1, :] == edge_id]  # 获取所有与当前超边连接的节点
+
+            # 获取这些节点的特征
+            edges_features = x[connected_nodes]
+
+            # 根据指定的聚合方式进行处理
+            if aggregation_type == 'mean':
+                nodes_feature = torch.mean(edges_features, dim=0)
+            elif aggregation_type == 'sum':
+                nodes_feature = torch.sum(edges_features, dim=0)
+            elif aggregation_type == 'max':
+                nodes_feature = torch.max(edges_features, dim=0)[0]
+            else:
+                raise ValueError("Unsupported aggregation type. Use 'mean', 'sum', or 'max'.")
+
+            # 添加该超边的特征到列表
+            nodes_features.append(nodes_feature)
+
+        # 将每条超边的特征堆叠成一个矩阵，形状为 (num_nodes, feature_dim)
+        nodes_features = torch.stack(nodes_features, dim=0)
+
+        return nodes_features

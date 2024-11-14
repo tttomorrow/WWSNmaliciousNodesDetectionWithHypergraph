@@ -296,7 +296,9 @@ def process_ns3_data(df):
     data = Data(x=hypernode_features, edge_index=edge_index, y=labels_tensor,
                 edge_ids=edge_ids, edge_weights=hyperedge_weights)  # 添加边ID作为超图节点ID，返回的x包含链路特征，特征最后三列
 
-    return data, eadj, T
+    adj = sparse_mx_to_torch_sparse_tensor(normalize(adj + sp.eye(adj.shape[0])))
+
+    return data, adj, T
 
 
 def process_ns3_data_by_timeid(df):
@@ -305,16 +307,16 @@ def process_ns3_data_by_timeid(df):
 
     # 为每个 TimeID 创建一个独立的超图数据集
     data_per_timeid = []
-    eadj_per_timeid = []
+    adj_per_timeid = []
     T_per_timeid = []
 
     for timeid, group in timeid_groups:
         data, eadj, T = process_ns3_data(group)
         data_per_timeid.append(data)
-        eadj_per_timeid.append(eadj)
+        adj_per_timeid.append(eadj)
         T_per_timeid.append(T)
 
-    return data_per_timeid, eadj_per_timeid, T_per_timeid, len(timeid_groups)
+    return data_per_timeid, adj_per_timeid, T_per_timeid, len(timeid_groups)
 
 
 # def process_wwsn_data(df):

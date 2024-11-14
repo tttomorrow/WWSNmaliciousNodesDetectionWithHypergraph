@@ -44,12 +44,20 @@ class GraphConvolution(Module):
         if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)  # 初始化偏置
 
-    def forward(self, H_v, edge_features, adj_e, T):
+    def forward(self, H_v, edge_features, adj_v, T):
         print(self.p.shape)
         multiplier = torch.spmm(T, torch.diag((edge_features @ self.p.t()).t()[0])) @ T.to_dense().t()
         mask = torch.eye(multiplier.shape[0])
+        print('multiplier.shape')
+        print(multiplier.shape)
+        print('mask.shape')
+        print(mask.shape)
         M = mask * torch.ones(multiplier.shape[0]) + (1. - mask) * multiplier
-        adjusted_A = torch.mul(M, adj_e.to_dense())
+        print('M.shape')
+        print(M.shape)
+        adjusted_A = torch.mul(M, adj_v.to_dense())
+        print('adjusted_A.shape')
+        print(adjusted_A.shape)
         '''
         print("adjusted_A is ", adjusted_A)
         normalized_adjusted_A = adjusted_A / adjusted_A.max(0, keepdim=True)[0]

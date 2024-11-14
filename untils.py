@@ -2,9 +2,11 @@ import pandas as pd
 import numpy as np
 import re
 import torch
+import networkx as nx
 from sklearn.model_selection import train_test_split
 from torch_geometric.data import Data
 from sklearn.metrics.pairwise import cosine_similarity
+import scipy.sparse as sp
 
 
 def parse_log_file(log_file, time_interval):
@@ -134,6 +136,8 @@ def process_csv(input_file, output_file, log_file, time_interval=2.50):
 
 
 def process_ns3_data(df):
+    # 在时间段内按源节点ID排序
+    df = df.sort_values(by="SrcNodeId")
     # 步骤1：提取节点的特征
     # 第一组特征：UDPCount, ARPRequestCount, ARPReplayCount, RouteRequestCount, RouteReplayCount, RouteErrorCount, RouteReplayACKCount, ACKCount
     node_features_group_1 = df[['UDPCount', 'ARPRequestCount', 'ARPReplayCount',
@@ -149,18 +153,37 @@ def process_ns3_data(df):
     # 合并这两组特征
     node_features = torch.cat([node_features_group_1, node_features_group_2], dim=1)
 
-    # 步骤2：为每个节点分配一个唯一的ID
-    # 获取所有节点（ListenerNode和SrcNodeId的并集）
-    nodes = pd.concat([df['ListenerNode'], df['SrcNodeId']]).unique()
-    # node_map = {node: i for i, node in enumerate(nodes)}  # 为每个节点分配一个唯一的ID
+    # 步骤2：构建图结构：用一个字典来表示图，键为节点，值为邻接节点
+    graph = {}  # 用于存储图的邻接信息
+
+    for _, row in df.iterrows():
+        listener_node = row['ListenerNode']  # 监听节点
+        src_node = row['SrcNodeId']  # 被监听节点
+
+        # 将被监听节点和监听节点之间建立边的关系
+        if src_node not in graph:
+            graph[src_node] = []
+        if listener_node not in graph:
+            graph[listener_node] = []
+
+        # 双向边关系（由于假设每个监听节点和被监听节点互为邻接）
+        graph[src_node].append(listener_node)
+        graph[listener_node].append(src_node)
+
+    # 使用 networkx 将字典转换为图对象
+    G = nx.from_dict_of_lists(graph)
+
+    # 获取邻接矩阵
+    adj = nx.adjacency_matrix(G)
 
     # 步骤3：构建超边（每个目标节点（被监听节点）对应一个超边，包含所有与该节点相关的源节点）
     hyperedges = {}  # 用字典存储每个目标节点对应的所有源节点（超边）
 
     # 步骤4：为每条边分配唯一的ID
     edge_map = {}  # 用于存储边的唯一ID
-
     edge_id_counter = 0  # 边ID计数器
+    # num_edges = len(df)  # 边的数量
+    # edge_adjacency = np.zeros((num_edges, num_edges))  # 初始化邻接矩阵
 
     for _, row in df.iterrows():
         listener_node = row['ListenerNode']  # 监听节点
@@ -175,6 +198,33 @@ def process_ns3_data(df):
         if src_node not in hyperedges:
             hyperedges[src_node] = []
         hyperedges[src_node].append(edge_map[edge])  # 将边的ID加入超边中
+
+    #     edge_id = edge_map[edge]
+    #     # 在邻接矩阵中记录边与边的连接关系
+    #     # 检查所有已经遍历过的边
+    #     for existing_edge_id in range(num_edges):
+    #         if edge_id != existing_edge_id:  # 排除自身连接
+    #             existing_row = df.iloc[existing_edge_id]
+    #             existing_src_node = existing_row['SrcNodeId']
+    #             existing_listener_node = existing_row['ListenerNode']
+    #
+    #             # 如果两条边共享相同的源节点或目的节点，则认为它们相邻
+    #             if (src_node == existing_src_node) or (listener_node == existing_listener_node) or \
+    #                     (listener_node == existing_src_node) or (src_node == existing_listener_node):
+    #                 edge_adjacency[edge_id, existing_edge_id] = 1
+    #                 edge_adjacency[existing_edge_id, edge_id] = 1  # 确保对称性
+    #
+    #  # 将邻接矩阵转换为 PyTorch 张量
+    # edge_adjacency = torch.tensor(edge_adjacency, dtype=torch.float)
+    # # print(edge_adjacency)
+
+    # create transform matrix T, dimension is num_node * num_edge in the graph
+    T = create_transition_matrix(adj)
+    T = sparse_mx_to_torch_sparse_tensor(T)
+
+    # create edge adjacent matrix from node/vertex adjacent matrix
+    eadj, edge_name = create_edge_adj(adj)
+    eadj = sparse_mx_to_torch_sparse_tensor(normalize(eadj))
 
     # 步骤5：构建超图中的边和节点特征
     edge_index = []  # 存储超边中的节点连接关系
@@ -236,16 +286,41 @@ def process_ns3_data(df):
     hyperedge_weights = torch.tensor(hyperedge_weights)
     hyperedge_weights = torch.nan_to_num(hyperedge_weights, nan=0.0)  # 使用 torch.nan_to_num() 将 NaN 替换为 0
 
-
     # 步骤8：标签提取（IsMaliciousNode）
-    labels = df['IsMaliciousNode'].map({0: 0, 1: 1}).values
+    df_unique = df.drop_duplicates(subset=['SrcNodeId'], keep='first')
+
+    # 按照 'SrcNodeId' 排序
+    df_sorted = df_unique.sort_values(by="SrcNodeId")
+
+    # 提取标签列 'IsMaliciousNode'
+    labels = df_sorted['IsMaliciousNode'].values
+
+    # 转换为 PyTorch tensor 格式
     labels_tensor = torch.tensor(labels, dtype=torch.long)
 
     # 步骤10：返回PyG数据对象
     data = Data(x=hypernode_features, edge_index=edge_index, y=labels_tensor,
                 edge_ids=edge_ids, edge_weights=hyperedge_weights)  # 添加边ID作为超图节点ID，返回的x包含链路特征，特征最后三列
 
-    return data
+    return data, eadj, T
+
+
+def process_ns3_data_by_timeid(df):
+    # 根据 TimeID 分组并处理每个时间段的数据
+    timeid_groups = df.groupby('TimeID')
+
+    # 为每个 TimeID 创建一个独立的超图数据集
+    data_per_timeid = []
+    eadj_per_timeid = []
+    T_per_timeid = []
+
+    for timeid, group in timeid_groups:
+        data, eadj, T = process_ns3_data(group)
+        data_per_timeid.append(data)
+        eadj_per_timeid.append(eadj)
+        T_per_timeid.append(T)
+
+    return data_per_timeid, eadj_per_timeid, T_per_timeid, len(timeid_groups)
 
 
 # def process_wwsn_data(df):
@@ -254,9 +329,67 @@ def process_ns3_data(df):
 def load_data(data_type, data_file):
     if data_type == 1:  # ns3仿真数据
         df = pd.read_csv(data_file)
-        processed_data = process_ns3_data(df[0:1000])
+        processed_data, e_adj, T, group_num = process_ns3_data_by_timeid(df[0:1000])
     # elif data_type == 0:  # wwsn实验数据
     #     df = pd.read_csv(data_file)
     #     processed_data = process_wwsn_data(df)
 
-    return processed_data
+    return processed_data, e_adj, T, group_num
+
+
+def create_edge_adj(vertex_adj):
+    '''
+    create an edge adjacency matrix from vertex adjacency matrix
+    '''
+    vertex_adj.setdiag(0)
+    edge_index = np.nonzero(sp.triu(vertex_adj, k=1))
+    num_edge = int(len(edge_index[0]))
+    edge_name = [x for x in zip(edge_index[0], edge_index[1])]
+
+    edge_adj = np.zeros((num_edge, num_edge))
+    for i in range(num_edge):
+        for j in range(i, num_edge):
+            if len(set(edge_name[i]) & set(edge_name[j])) == 0:
+                edge_adj[i, j] = 0
+            else:
+                edge_adj[i, j] = 1
+    adj = edge_adj + edge_adj.T
+    np.fill_diagonal(adj, 1)
+    return sp.csr_matrix(adj), edge_name
+
+
+def create_transition_matrix(vertex_adj):
+    '''create N_v * N_e transition matrix'''
+    vertex_adj.setdiag(0)
+    edge_index = np.nonzero(sp.triu(vertex_adj, k=1))
+    num_edge = int(len(edge_index[0]))
+    edge_name = [x for x in zip(edge_index[0], edge_index[1])]
+
+    row_index = [i for sub in edge_name for i in sub]
+    col_index = np.repeat([i for i in range(num_edge)], 2)
+
+    data = np.ones(num_edge * 2)
+    T = sp.csr_matrix((data, (row_index, col_index)),
+                      shape=(vertex_adj.shape[0], num_edge))
+
+    return T
+
+
+def sparse_mx_to_torch_sparse_tensor(sparse_mx):
+    """Convert a scipy sparse matrix to a torch sparse tensor."""
+    sparse_mx = sparse_mx.tocoo().astype(np.float32)
+    indices = torch.from_numpy(
+        np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
+    values = torch.from_numpy(sparse_mx.data)
+    shape = torch.Size(sparse_mx.shape)
+    return torch.sparse.FloatTensor(indices, values, shape)
+
+
+def normalize(mx):
+    """Row-normalize sparse matrix"""
+    rowsum = np.array(mx.sum(1)).astype("float")
+    r_inv = np.power(rowsum, -1).flatten()
+    r_inv[np.isinf(r_inv)] = 0.
+    r_mat_inv = sp.diags(r_inv)
+    mx = r_mat_inv.dot(mx)
+    return mx

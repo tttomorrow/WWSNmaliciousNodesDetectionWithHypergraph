@@ -35,6 +35,7 @@ class GraphConvolution(Module):
         else:
             self.register_parameter('bias', None)  # 如果不使用偏置项，注册为None
         self.reset_parameters()  # 重置参数
+        self.p = Parameter(torch.from_numpy(np.random.normal(size=(1, in_features_v))).float())
 
     def reset_parameters(self):
         # 使用均匀分布初始化权重和偏置
@@ -43,7 +44,7 @@ class GraphConvolution(Module):
         if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)  # 初始化偏置
 
-    def forward(self, H_v, edge_features, adj_e, adj_v, T):
+    def forward(self, H_v, edge_features, adj_e, T):
 
         multiplier = torch.spmm(T.t(), torch.diag((H_v @ self.p.t()).t()[0])) @ T.to_dense()
         mask = torch.eye(multiplier.shape[0])

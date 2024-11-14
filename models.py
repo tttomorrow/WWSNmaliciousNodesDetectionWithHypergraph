@@ -18,16 +18,20 @@ class HypergraphModel(nn.Module):
                                               nn.Linear(32, 2),
                                               nn.Softmax(dim=1))
 
-    def forward(self, x, edge_index, edge_weight, edge_features):
+    def forward(self, x, edge_index, edge_weight, edge_features, adj_e, T):
         # 前向传播函数，输入为节点特征、超边连接、超边权重和边特征
         x = self.layer1(x, edge_index, edge_weight)  # 通过第一个超图卷积层
         x = torch.relu(x)  # 激活函数
         x = self.layer2(x, edge_index, edge_weight)  # 通过第二个超图卷积层
         x = torch.relu(x)  # 激活函数
+        print('x.shape')
+        print(x.shape)
 
         # 聚合节点特征
         node_features = self.aggregate_node_features(x, edge_index)  # 聚合超图卷积得到的节点特征
-        shared_feature = self.edge_conv(node_features, edge_features)  # 将边特征融合到节点特征中
+        print('node_features.shape')
+        print(node_features.shape)
+        shared_feature = self.edge_conv(node_features, edge_features, adj_e, T)  # 将边特征融合到节点特征中
 
         # 分类结果
         class_output = self.class_classifier(shared_feature)

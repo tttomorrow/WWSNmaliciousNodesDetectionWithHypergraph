@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 from layers import HypergraphConvLayer, GraphConvolution, CustomBatchNorm
 
 
@@ -11,33 +11,31 @@ class HypergraphModel(nn.Module):
     def __init__(self, num_features, edge_features_size):
         super(HypergraphModel, self).__init__()
         # 初始化两个超图卷积层
-        self.layer1 = HypergraphConvLayer(num_features, 64)  # 第一个超图卷积层，输出特征为64
-        self.layer2 = HypergraphConvLayer(64, 32)  # 第二个超图卷积层，输出特征为32
+        self.layer1 = HypergraphConvLayer(num_features, 32)  # 第一个超图卷积层，输出特征为64
+        # self.layer2 = HypergraphConvLayer(64, 32)  # 第二个超图卷积层，输出特征为32
         self.edge_conv = GraphConvolution(32, 32, edge_features_size, 32)  # 图卷积层，融合边特征
         # 分类器
         self.class_classifier = nn.Sequential(nn.Linear(32, 32),
                                               nn.ReLU(),
                                               # nn.Dropout(p=self.dropout),
                                               nn.Linear(32, 2))
-        self.norm1 = CustomBatchNorm(num_features, 64)
-        self.norm2 = CustomBatchNorm(32, 32)
-        self.norm3 = CustomBatchNorm(edge_features_size, edge_features_size)
+        self.norm1 = CustomBatchNorm(32, 32)
+        self.norm2 = CustomBatchNorm(edge_features_size, edge_features_size)
 
 
-    def forward(self, x, edge_index, edge_weight, edge_features, adj_e, T):
+    def forward(self, x, edge_index, edge_weight, edge_features, adj, T):
         # 前向传播函数，输入为节点特征、超边连接、超边权重和边特征
-        x = self.norm1(x)
+        #
         x = self.layer1(x, edge_index, edge_weight)  # 通过第一个超图卷积层
-        x = torch.relu(x)  # 激活函数
-        x = self.layer2(x, edge_index, edge_weight)  # 通过第二个超图卷积层
-        x = self.norm2(x)
-        x = torch.relu(x)  # 激活函数
+        # x = self.layer2(x, edge_index, edge_weight)  # 通过第二个超图卷积层
+        x = self.norm1(x)
+        x = F.relu(x)  # 激活函数
 
         # 聚合节点特征
         node_features = self.aggregate_node_features(x, edge_index)  # 聚合超图卷积得到的节点特征
 
-        edge_features = self.norm3(edge_features)
-        shared_feature = self.edge_conv(node_features, edge_features, adj_e, T)  # 将边特征融合到节点特征中
+        edge_features = self.norm2(edge_features)
+        shared_feature = self.edge_conv(node_features, edge_features, adj, T)  # 将边特征融合到节点特征中
 
         # 分类结果
         class_output = self.class_classifier(shared_feature)

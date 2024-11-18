@@ -6,7 +6,8 @@ import networkx as nx
 from torch_geometric.data import Data
 from sklearn.metrics.pairwise import cosine_similarity
 import scipy.sparse as sp
-
+import torch.nn.functional as F
+from sklearn.metrics import roc_auc_score
 
 def parse_log_file(log_file, time_interval):
     """
@@ -168,7 +169,7 @@ def process_ns3_data(df):
         # 双向边关系（由于假设每个监听节点和被监听节点互为邻接）
         graph[src_node].append(listener_node)
 
-    total_edges = sum(len(neighbors) for neighbors in graph.values())
+    # total_edges = sum(len(neighbors) for neighbors in graph.values())
     # print(f"Total number of edges (directed graph): {total_edges}")
     # 使用 networkx 创建有向图
     G = nx.DiGraph()  # 使用 DiGraph 来创建有向图
@@ -214,10 +215,10 @@ def process_ns3_data(df):
     # print('T.shape')
     # print(T.shape)
     # create edge adjacent matrix from node/vertex adjacent matrix
-    eadj, edge_name = create_edge_adj(adj)
+    # eadj, edge_name = create_edge_adj(adj)
     # print('eadj.shape')
     # print(eadj.shape)
-    eadj = sparse_mx_to_torch_sparse_tensor(normalize(eadj))
+    # eadj = sparse_mx_to_torch_sparse_tensor(normalize(eadj))
 
     # 步骤5：构建超图中的边和节点特征
     edge_index = []  # 存储超边中的节点连接关系
@@ -289,8 +290,12 @@ def process_ns3_data(df):
     # 提取标签列 'IsMaliciousNode'
     labels = df_sorted['IsMaliciousNode'].values
 
-    # 转换为 PyTorch tensor 格式
-    labels_tensor = torch.tensor(labels, dtype=torch.long)
+    # 进行独热编码，创建一个大小为 (n_samples, n_classes) 的矩阵
+    # 这里n_classes是2，因为有0和1两个类别
+    labels_one_hot = F.one_hot(torch.tensor(labels, dtype=torch.long), num_classes=2)
+
+    # labels_tensor 现在是一个二维张量，每一行是独热编码表示
+    labels_tensor = labels_one_hot.float()  # 转换为float类型（常用于分类任务）
 
     # 步骤10：返回PyG数据对象
     data = Data(x=hypernode_features, edge_index=edge_index, y=labels_tensor,
@@ -316,7 +321,10 @@ def process_ns3_data_by_timeid(df):
         adj_per_timeid.append(adj)
         T_per_timeid.append(T)
 
-    return data_per_timeid, adj_per_timeid, T_per_timeid, len(timeid_groups)
+    data_per_timeid = data_per_timeid[:-1]
+    adj_per_timeid = adj_per_timeid[:-1]
+    T_per_timeid = T_per_timeid[:-1]
+    return data_per_timeid, adj_per_timeid, T_per_timeid, len(timeid_groups) - 1
 
 
 # def process_wwsn_data(df):
@@ -399,7 +407,7 @@ def normalize(mx):
 def load_data(data_type, data_file):
     if data_type == 1:  # ns3仿真数据
         df = pd.read_csv(data_file)
-        processed_data, adj, T, group_num = process_ns3_data_by_timeid(df[0:1000])
+        processed_data, adj, T, group_num = process_ns3_data_by_timeid(df)
     # elif data_type == 0:  # wwsn实验数据
     #     df = pd.read_csv(data_file)
     #     processed_data = process_wwsn_data(df)
@@ -408,6 +416,49 @@ def load_data(data_type, data_file):
 
 def accuracy(output, labels):
     preds = output.max(1)[1].type_as(labels)
-    correct = preds.eq(labels).double()
+    correct = preds.eq(labels[:,1]).double()
     correct = correct.sum()
     return correct / len(labels)
+
+
+def auc(output, labels):
+    # 假设 output 是模型的 raw 输出（logits），labels 是 ground truth 的标签
+    # 这里假设输出是二维张量，其中第二列是正类的概率（例如，经过 softmax 或 sigmoid）
+
+    # 如果模型输出的是 logits，通常需要进行 softmax 或 sigmoid 转换
+    probs = torch.nn.functional.softmax(output, dim=1)[:, 1]  # 对于二分类问题，取正类的概率
+
+    # 计算 AUC 分数，注意 labels 需要是 0 或 1 的形式
+    auc_score = roc_auc_score(labels[:, 1].cpu().numpy(), probs.cpu().detach().numpy())
+
+    return auc_score
+
+def precision(output, labels):
+    preds = output.max(1)[1]  # 获取预测的类别标签
+    tp = ((preds == 1) & (labels[:, 1] == 1)).sum().item()  # 真正类
+    fp = ((preds == 1) & (labels[:, 1] == 0)).sum().item()  # 假正类
+    precision = tp / (tp + fp) if (tp + fp) != 0 else 0  # 防止除零错误
+    return precision
+
+def recall(output, labels):
+    preds = output.max(1)[1]  # 获取预测的类别标签
+    tp = ((preds == 1) & (labels[:, 1] == 1)).sum().item()  # 真正类
+    fn = ((preds == 0) & (labels[:, 1] == 1)).sum().item()  # 假负类
+    recall = tp / (tp + fn) if (tp + fn) != 0 else 0  # 防止除零错误
+    return recall
+
+def f1_score(output, labels):
+    prec = precision(output, labels)
+    rec = recall(output, labels)
+    f1 = 2 * (prec * rec) / (prec + rec) if (prec + rec) != 0 else 0  # 防止除零错误
+    return f1
+
+
+def confusion_matrix(output, labels):
+    preds = output.max(1)[1]  # 获取预测的类别标签
+    tp = ((preds == 1) & (labels[:, 1] == 1)).sum().item()  # 真正类
+    tn = ((preds == 0) & (labels[:, 1] == 0)).sum().item()  # 真负类
+    fp = ((preds == 1) & (labels[:, 1] == 0)).sum().item()  # 假正类
+    fn = ((preds == 0) & (labels[:, 1] == 1)).sum().item()  # 假负类
+
+    return {'TP': tp, 'TN': tn, 'FP': fp, 'FN': fn}

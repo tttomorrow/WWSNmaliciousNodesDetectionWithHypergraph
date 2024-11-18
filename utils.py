@@ -98,11 +98,11 @@ def process_csv(input_file, output_file, log_file, time_interval=2.50):
                 ack_count = packet_counts.get('ACK', 0)
 
                 # 获取当前时间段丢包次数
-                drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(src_node_id, 0)
+                drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(src_node_id - 1, 0)
 
                 # 是否是恶意节点、黑洞节点
-                is_malicious = 1 if src_node_id in log_data['malicious_nodes'] else 0
-                is_blackhole = 1 if src_node_id in log_data['blackhole_nodes'] else 0
+                is_malicious = 1 if src_node_id - 1 in log_data['malicious_nodes'] else 0
+                is_blackhole = 1 if src_node_id - 1 in log_data['blackhole_nodes'] else 0
                 is_selective_forwarding = 0  # 暂时没有选择性转发节点的具体信息
 
                 # 创建结果记录
@@ -128,8 +128,59 @@ def process_csv(input_file, output_file, log_file, time_interval=2.50):
                     'TimeID': int(time_segment / time_interval)
                 })
 
+        # 在每个时间段内，处理反向边逻辑
+        # 获取 ListenerNode 和 SrcNodeId 的集合
+        listener_nodes = set(group['listener'])
+        src_nodes = set(group['SrcNodeId'] - 1)
+
+        # 找到不在 SrcNodeId 中的 ListenerNode
+        missing_listener_nodes = listener_nodes - src_nodes
+
+        if missing_listener_nodes:
+            print(missing_listener_nodes)
+            # 新的数据列表（反向边）
+            new_edges = []
+
+            # 为每个缺失的 ListenerNode 添加反向边
+            for missing_listener in missing_listener_nodes:
+                # 找到该 ListenerNode 的所有出边（即原数据中的 ListenerNode 为 missing_listener 的边）
+                original_edges = group[group['listener'] == missing_listener]
+                for _, row in original_edges.iterrows():
+                    # 反向边的 ListenerNode 和 SrcNodeId 对调，特征值全部为 0
+                    is_malicious = 1 if row['listener'] in log_data['malicious_nodes'] else 0
+                    is_blackhole = 1 if row['listener'] in log_data['blackhole_nodes'] else 0
+
+                    # 获取当前时间段丢包次数
+                    drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(row['listener'], 0)
+
+                    new_edge = {
+                        'ListenerNode': row['SrcNodeId'] - 1,
+                        'SrcNodeId': row['listener'],
+                        'UDPCount': 0,
+                        'ARPRequestCount': 0,
+                        'ARPReplayCount': 0,
+                        'RouteRequestCount': 0,
+                        'RouteReplayCount': 0,
+                        'RouteErrorCount': 0,
+                        'RouteReplayACKCount': 0,
+                        'ACKCount': 0,
+                        'AvgSNR': 0,
+                        'AvgSignalPower': 0,
+                        'AvgNoisePower': 0,
+                        'PacketLossCount': drop_count,
+                        'IsMaliciousNode': is_malicious,
+                        'IsBlackholeNode': is_blackhole,
+                        'IsSelectiveForwardingNode': 0,  # 仍然没有选择性转发节点的具体信息
+                        'TimeSegment': time_segment,
+                        'TimeID': int(time_segment / time_interval)
+                    }
+                    result.append(new_edge)
+        else:
+            continue
+
     # 将结果转换为 DataFrame
     result_df = pd.DataFrame(result)
+
 
     # 保存结果到 CSV 文件
     result_df.to_csv(output_file, index=False)
@@ -428,9 +479,14 @@ def auc(output, labels):
     # 如果模型输出的是 logits，通常需要进行 softmax 或 sigmoid 转换
     probs = torch.nn.functional.softmax(output, dim=1)[:, 1]  # 对于二分类问题，取正类的概率
 
-    # 计算 AUC 分数，注意 labels 需要是 0 或 1 的形式
-    auc_score = roc_auc_score(labels[:, 1].cpu().numpy(), probs.cpu().detach().numpy())
-
+    # 确保 labels 是一维的，并检查标签中的类别数量
+    if len(np.unique(labels[:, 1].cpu().numpy())) == 2:
+        # 计算 AUC 分数
+        auc_score = roc_auc_score(labels[:, 1].cpu().numpy(), probs.cpu().detach().numpy())
+        # print(auc_score)
+    else:
+        # print("Warning: Only one class present in labels.")
+        auc_score = 0  # 或者可以返回其他默认值或提示
     return auc_score
 
 def precision(output, labels):

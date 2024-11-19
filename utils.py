@@ -361,7 +361,7 @@ def process_ns3_data_by_timeid(df):
     adj_per_timeid = []
     T_per_timeid = []
 
-    for timeid, group in timeid_groups:
+    for group in timeid_groups:
         data, adj, T = process_ns3_data(group)
         data_per_timeid.append(data)
         adj_per_timeid.append(adj)

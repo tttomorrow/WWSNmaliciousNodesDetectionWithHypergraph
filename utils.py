@@ -265,11 +265,6 @@ def process_ns3_data(df):
     T = sparse_mx_to_torch_sparse_tensor(T)
     # print('T.shape')
     # print(T.shape)
-    # create edge adjacent matrix from node/vertex adjacent matrix
-    # eadj, edge_name = create_edge_adj(adj)
-    # print('eadj.shape')
-    # print(eadj.shape)
-    # eadj = sparse_mx_to_torch_sparse_tensor(normalize(eadj))
 
     # 步骤5：构建超图中的边和节点特征
     edge_index = []  # 存储超边中的节点连接关系
@@ -381,32 +376,6 @@ def process_ns3_data_by_timeid(df):
 # def process_wwsn_data(df):
 
 
-def create_edge_adj(vertex_adj):
-
-    # 获取邻接矩阵中所有非零元素的索引，表示图中存在的边
-    edge_index = np.nonzero(vertex_adj)
-
-    # 计算边的数量
-    num_edge = len(edge_index[0])
-
-    # 创建一个边名列表，每个元素是一个二元组 (src_node, tgt_node)，表示有向边
-    edge_name = [(edge_index[0][i], edge_index[1][i]) for i in range(num_edge)]
-
-    # 初始化一个大小为 num_edge x num_edge 的边邻接矩阵
-    edge_adj = np.zeros((num_edge, num_edge))
-
-    # 遍历所有边对，检查是否存在共同的节点（无论是源节点还是目标节点）
-    for i in range(num_edge):
-        for j in range(i, num_edge):
-            # 如果边 i 和 边 j 有共同的节点，则这两条边是相连的
-            if len(set(edge_name[i]) & set(edge_name[j])) > 0:
-                edge_adj[i, j] = 1
-
-    # 返回的邻接矩阵需要是稀疏矩阵，使用 csr_matrix 来节省内存
-    adj = sp.csr_matrix(edge_adj)
-
-    # 返回边邻接矩阵和边列表
-    return adj, edge_name
 
 
 def create_transition_matrix(vertex_adj):

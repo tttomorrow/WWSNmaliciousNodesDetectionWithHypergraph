@@ -8,6 +8,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 import scipy.sparse as sp
 import torch.nn.functional as F
 from sklearn.metrics import roc_auc_score
+from collections import defaultdict
+
 
 def parse_log_file(log_file, time_interval):
     """
@@ -57,7 +59,7 @@ def parse_log_file(log_file, time_interval):
     }
 
 
-def process_ns3_csv(input_rx_file, input_tx_file, output_file, log_file, time_interval=10.0):
+def process_ns3_csv(input_rx_file, output_file, log_file, time_interval=10.0):
     # 读取 RX CSV 文件
     df = pd.read_csv(input_rx_file)
 
@@ -72,45 +74,42 @@ def process_ns3_csv(input_rx_file, input_tx_file, output_file, log_file, time_in
     # 创建时间段列（按时间间隔分段）
     df['TimeSegment'] = np.floor(df['Time'] / time_interval) * time_interval
 
-    # tx数据进行相似的处理
-    df_tx = pd.read_csv(input_tx_file)
-    df_tx['Time'] = df_tx['Time'].astype(float)
-    df_tx['TimeSegment'] = np.floor(df_tx['Time'] / time_interval) * time_interval
-
-
-
-
     # 初始化结果列表
     result = []
+    is_sink = 0
 
     # 按时间段分组，遍历每个时间段
-    for (time_segment, group), (time_segment_tx, group_tx) in zip(df.groupby('TimeSegment'), df_tx.groupby('TimeSegment')):
+    for time_segment, group in df.groupby('TimeSegment'):
         # # 先处理Tx数据
-        tx_udp_count = {}
-        tx_arp_request_count = {}
-        tx_arp_reply_count = {}
-        tx_route_request_count = {}
-        tx_route_reply_count = {}
-        tx_route_error_count = {}
-        tx_route_reply_ack_count = {}
-        tx_ack_count = {}
-        for source_tx, sub_group_tx in group_tx.groupby('SrcNodeId'):
+        rec_udp_count = defaultdict(int)
+        rec_arp_request_count = defaultdict(int)
+        rec_arp_reply_count = defaultdict(int)
+        rec_route_request_count = defaultdict(int)
+        rec_route_reply_count = defaultdict(int)
+        rec_route_error_count = defaultdict(int)
+        rec_route_reply_ack_count = defaultdict(int)
+        rec_ack_count = defaultdict(int)
+        for des_tx, sub_group_tx in group.groupby('DesNodeId'):
+            if des_tx == 255:
+                continue
             # 注意！！！！！！！！！！！！！！！！！！！！！！          RX文件中sourceID比正确值大1
             # 统计每个数据包类型的发送次数, TX文件中sourceID比正确值大1， listeneriD则比正确值小1
-            tx_packets_count = sub_group_tx['PacketType'].value_counts().to_dict()
+            # Tx中的source_tx为数据包的目的节点
+            rec_packets_count = sub_group_tx['PacketType'].value_counts().to_dict()
             # 获取UDP、ARP、ADOV的发送次数，其他包类型不统计
-            tx_udp_count[source_tx - 1] = tx_packets_count.get('UDP', 0)
-            tx_arp_request_count[source_tx - 1] = tx_packets_count.get('ARP Request', 0)
-            tx_arp_reply_count[source_tx - 1] = tx_packets_count.get('ARP Replay', 0)
-            tx_route_request_count[source_tx - 1] = tx_packets_count.get('Route Request', 0)
-            tx_route_reply_count[source_tx - 1] = tx_packets_count.get('Route Replay', 0)
-            tx_route_error_count[source_tx - 1] = tx_packets_count.get('Route Error', 0)
-            tx_route_reply_ack_count[source_tx - 1] = tx_packets_count.get('Route Replay ACK', 0)
-            tx_ack_count[source_tx - 1] = tx_packets_count.get('ACK', 0)
-
+            rec_udp_count[des_tx] = rec_packets_count.get('UDP', 0)
+            rec_arp_request_count[des_tx] = rec_packets_count.get('ARP Request', 0)
+            rec_arp_reply_count[des_tx] = rec_packets_count.get('ARP Replay', 0)
+            rec_route_request_count[des_tx] = rec_packets_count.get('Route Request', 0)
+            rec_route_reply_count[des_tx] = rec_packets_count.get('Route Replay', 0)
+            rec_route_error_count[des_tx] = rec_packets_count.get('Route Error', 0)
+            rec_route_reply_ack_count[des_tx] = rec_packets_count.get('Route Replay ACK', 0)
+            rec_ack_count[des_tx] = rec_packets_count.get('ACK', 0)
+        # print(rec_udp_count)
         # 按照监听节点和被监听节点分组
         for listener, sub_group in group.groupby('listener'):
             for src_node_id, src_group in sub_group.groupby('SrcNodeId'):
+                is_sink = 0  # 标记sink节点
                 # 计算信道质量指标（例如：SNR, SignalPower, NoisePower的均值）
                 avg_snr = src_group['SNR'].mean()
                 avg_signal_power = src_group['SignalPower'].mean()
@@ -130,33 +129,35 @@ def process_ns3_csv(input_rx_file, input_tx_file, output_file, log_file, time_in
                 ack_count = packet_counts.get('ACK', 0)
 
                 # 获取当前时间段丢包次数
-                drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(src_node_id - 1, 0)
+                # ！！！！！！！！！！！！！！！！ns3中节点id从0开始计算，本代码所有id从1开始，故此处加1
+                drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(src_node_id + 1, 0)
 
                 # 是否是恶意节点、黑洞节点
-                is_malicious = 1 if src_node_id - 1 in log_data['malicious_nodes'] else 0
-                is_blackhole = 1 if src_node_id - 1 in log_data['blackhole_nodes'] else 0
+                # ！！！！！！！！！！！！！！！！ns3中节点id从0开始计算，本代码所有id从1开始，故此处加1
+                is_malicious = 1 if src_node_id + 1 in log_data['malicious_nodes'] else 0
+                is_blackhole = 1 if src_node_id + 1 in log_data['blackhole_nodes'] else 0
+                if src_node_id == 1:
+                    is_sink = 1
                 is_selective_forwarding = 0  # 暂时没有选择性转发节点的具体信息
-
-                # 创建结果记录
                 result.append({
                     'ListenerNode': listener,
-                    'SrcNodeId': src_node_id - 1,
-                    'UDPCount': udp_count,
-                    'ARPRequestCount': arp_request_count,
-                    'ARPReplayCount': arp_reply_count,
-                    'RouteRequestCount': route_request_count,
-                    'RouteReplayCount': route_reply_count,
-                    'RouteErrorCount': route_error_count,
-                    'RouteReplayACKCount': route_reply_ack_count,
-                    'ACKCount': ack_count,
-                    'TxUDPCount': tx_udp_count[src_node_id - 1],
-                    'TxARPRequestCount': tx_arp_request_count[src_node_id - 1],
-                    'TxARPReplayCount': tx_arp_reply_count[src_node_id - 1],
-                    'TxRouteRequestCount': tx_route_request_count[src_node_id - 1],
-                    'TxRouteReplayCount': tx_route_reply_count[src_node_id - 1],
-                    'TxRouteErrorCount': tx_route_error_count[src_node_id - 1],
-                    'TxRouteReplayACKCount': tx_route_reply_ack_count[src_node_id - 1],
-                    'TxACKCount': ack_count,
+                    'SrcNodeId': src_node_id,
+                    'SendUDPCount': udp_count,
+                    'SendARPRequestCount': arp_request_count,
+                    'SendARPReplayCount': arp_reply_count,
+                    'SendRouteRequestCount': route_request_count,
+                    'SendRouteReplayCount': route_reply_count,
+                    'SendRouteErrorCount': route_error_count,
+                    'SendRouteReplayACKCount': route_reply_ack_count,
+                    'RecUDPCount': rec_udp_count[src_node_id],
+                    'RecARPRequestCount': rec_arp_request_count[src_node_id],
+                    'RecARPReplayCount': rec_arp_reply_count[src_node_id],
+                    'RecRouteRequestCount': rec_route_request_count[src_node_id],
+                    'RecRouteReplayCount': rec_route_reply_count[src_node_id],
+                    'RecRouteErrorCount': rec_route_error_count[src_node_id],
+                    'RecRouteReplayACKCount': rec_route_reply_ack_count[src_node_id],
+                    'RecACKCount': rec_ack_count[src_node_id],
+                    'IsSink': is_sink,
                     'AvgSNR': avg_snr,
                     'AvgSignalPower': avg_signal_power,
                     'AvgNoisePower': avg_noise_power,
@@ -171,7 +172,7 @@ def process_ns3_csv(input_rx_file, input_tx_file, output_file, log_file, time_in
         # 在每个时间段内，处理反向边逻辑
         # 获取 ListenerNode 和 SrcNodeId 的集合
         listener_nodes = set(group['listener'])
-        src_nodes = set(group['SrcNodeId'] - 1)
+        src_nodes = set(group['SrcNodeId'])
 
         # 找到不在 SrcNodeId 中的 ListenerNode
         missing_listener_nodes = listener_nodes - src_nodes
@@ -183,37 +184,41 @@ def process_ns3_csv(input_rx_file, input_tx_file, output_file, log_file, time_in
 
             # 为每个缺失的 ListenerNode 添加反向边
             for missing_listener in missing_listener_nodes:
+                is_sink = 0  # 标记sink节点
                 # 找到该 ListenerNode 的所有出边（即原数据中的 ListenerNode 为 missing_listener 的边）
                 original_edges = group[group['listener'] == missing_listener]
                 # 去除重复的边
                 original_edges = original_edges.drop_duplicates(subset=['listener'])
                 for _, row in original_edges.iterrows():
                     # 反向边的 ListenerNode 和 SrcNodeId 对调，特征值全部为 0
-                    is_malicious = 1 if row['listener'] in log_data['malicious_nodes'] else 0
-                    is_blackhole = 1 if row['listener'] in log_data['blackhole_nodes'] else 0
+                    # ！！！！！！！！！！！！！！！！ns3中节点id从0开始计算，本代码所有id从1开始，故此处加1
+                    is_malicious = 1 if row['listener'] + 1 in log_data['malicious_nodes'] else 0
+                    is_blackhole = 1 if row['listener'] + 1 in log_data['blackhole_nodes'] else 0
 
                     # 获取当前时间段丢包次数
-                    drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(row['listener'], 0)
-
+                    # ！！！！！！！！！！！！！！！！ns3中节点id从0开始计算，本代码所有id从1开始，故此处加1
+                    drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(row['listener'] + 1, 0)
+                    if row['listener'] == 1:
+                        is_sink = 1
                     new_edge = {
-                        'ListenerNode': row['SrcNodeId'] - 1,
+                        'ListenerNode': row['SrcNodeId'],
                         'SrcNodeId': row['listener'],
-                        'UDPCount': 0,
-                        'ARPRequestCount': 0,
-                        'ARPReplayCount': 0,
-                        'RouteRequestCount': 0,
-                        'RouteReplayCount': 0,
-                        'RouteErrorCount': 0,
-                        'RouteReplayACKCount': 0,
-                        'ACKCount': 0,
-                        'TxUDPCount': 0,
-                        'TxARPRequestCount': 0,
-                        'TxARPReplayCount': 0,
-                        'TxRouteRequestCount': 0,
-                        'TxRouteReplayCount': 0,
-                        'TxRouteErrorCount': 0,
-                        'TxRouteReplayACKCount': 0,
-                        'TxACKCount': 0,
+                        'SendUDPCount': 0,
+                        'SendARPRequestCount': 0,
+                        'SendARPReplayCount': 0,
+                        'SendRouteRequestCount': 0,
+                        'SendRouteReplayCount': 0,
+                        'SendRouteErrorCount': 0,
+                        'SendRouteReplayACKCount': 0,
+                        'RecUDPCount': 0,
+                        'RecARPRequestCount': 0,
+                        'RecARPReplayCount': 0,
+                        'RecRouteRequestCount': 0,
+                        'RecRouteReplayCount': 0,
+                        'RecRouteErrorCount': 0,
+                        'RecRouteReplayACKCount': 0,
+                        'RecACKCount': 0,
+                        'IsSink': is_sink,
                         'AvgSNR': 0,
                         'AvgSignalPower': 0,
                         'AvgNoisePower': 0,
@@ -231,9 +236,6 @@ def process_ns3_csv(input_rx_file, input_tx_file, output_file, log_file, time_in
     # 将结果转换为 DataFrame
     result_df = pd.DataFrame(result)
 
-
-
-
     # 保存结果到 CSV 文件
     result_df.to_csv(output_file, index=False)
 
@@ -243,11 +245,11 @@ def process_ns3_data(df):
     df = df.sort_values(by="SrcNodeId")
     # 步骤1：提取节点的特征
     # 第一组特征：UDPCount, ARPRequestCount, ARPReplayCount, RouteRequestCount, RouteReplayCount, RouteErrorCount, RouteReplayACKCount, ACKCount
-    node_features_group_1 = df[['UDPCount', 'ARPRequestCount', 'ARPReplayCount',
-                                'RouteRequestCount', 'RouteReplayCount', 'RouteErrorCount',
-                                'RouteReplayACKCount', 'ACKCount', 'TxUDPCount', 'TxARPRequestCount', 'TxARPReplayCount',
-                                'TxRouteRequestCount', 'TxRouteReplayCount', 'TxRouteErrorCount',
-                                'TxRouteReplayACKCount', 'TxACKCount']].values
+    node_features_group_1 = df[['SendUDPCount', 'SendARPRequestCount', 'SendARPReplayCount',
+                                'SendRouteRequestCount', 'SendRouteReplayCount', 'SendRouteErrorCount',
+                                'SendRouteReplayACKCount', 'RecUDPCount', 'RecARPRequestCount', 'RecARPReplayCount',
+                                'RecRouteRequestCount', 'RecRouteReplayCount', 'RecRouteErrorCount',
+                                'RecRouteReplayACKCount', 'RecACKCount', 'IsSink']].values
     node_features_group_1 = torch.tensor(node_features_group_1, dtype=torch.int)
     num_feature1 = node_features_group_1.size(1)
 
@@ -430,8 +432,6 @@ def process_ns3_data_by_timeid(df):
 # def process_wwsn_data(df):
 
 
-
-
 def create_transition_matrix(vertex_adj):
     '''create N_v * N_e transition matrix'''
     # 不去除自环，确保所有边都被计入
@@ -478,6 +478,7 @@ def normalize(mx):
     mx = r_mat_inv.dot(mx)
     return mx
 
+
 def load_data(data_type, data_file):
     if data_type == 1:  # ns3仿真数据
         df = pd.read_csv(data_file)
@@ -488,9 +489,10 @@ def load_data(data_type, data_file):
 
     return processed_data, adj, T, group_num
 
+
 def accuracy(output, labels):
     preds = output.max(1)[1].type_as(labels)
-    correct = preds.eq(labels[:,1]).double()
+    correct = preds.eq(labels[:, 1]).double()
     correct = correct.sum()
     return correct / len(labels)
 
@@ -512,6 +514,7 @@ def auc(output, labels):
         auc_score = 0  # 或者可以返回其他默认值或提示
     return auc_score
 
+
 def precision(output, labels):
     preds = output.max(1)[1]  # 获取预测的类别标签
     tp = ((preds == 1) & (labels[:, 1] == 1)).sum().item()  # 真正类
@@ -519,12 +522,14 @@ def precision(output, labels):
     precision = tp / (tp + fp) if (tp + fp) != 0 else 0  # 防止除零错误
     return precision
 
+
 def recall(output, labels):
     preds = output.max(1)[1]  # 获取预测的类别标签
     tp = ((preds == 1) & (labels[:, 1] == 1)).sum().item()  # 真正类
     fn = ((preds == 0) & (labels[:, 1] == 1)).sum().item()  # 假负类
     recall = tp / (tp + fn) if (tp + fn) != 0 else 0  # 防止除零错误
     return recall
+
 
 def f1_score(output, labels):
     prec = precision(output, labels)

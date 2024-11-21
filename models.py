@@ -19,16 +19,18 @@ class HypergraphModel(nn.Module):
                                               nn.ReLU(),
                                               # nn.Dropout(p=self.dropout),
                                               nn.Linear(32, 2))
-        self.norm1 = CustomBatchNorm(32, 32)
+        self.norm1 = CustomBatchNorm(num_features, num_features)
         self.norm2 = CustomBatchNorm(edge_features_size, edge_features_size)
 
 
     def forward(self, x, edge_index, edge_weight, edge_features, adj, T):
         # 前向传播函数，输入为节点特征、超边连接、超边权重和边特征
-        #
+        # print(x)
+        x = self.norm1(x)
+        # print(x)
         x = self.layer1(x, edge_index, edge_weight)  # 通过第一个超图卷积层
         # x = self.layer2(x, edge_index, edge_weight)  # 通过第二个超图卷积层
-        x = self.norm1(x)
+
         x = F.relu(x)  # 激活函数
 
         # 聚合节点特征

@@ -162,7 +162,7 @@ def process_ns3_csv(input_rx_file, output_file, log_file, time_interval=10.0):
                 drop_count = log_data['drop_packet_info'].get(time_segment, {}).get(src_node_id - 1, 0)
 
                 # 是否是恶意节点、黑洞节点
-                # ！！！！！！！！！！！！！！！！ns3中节点id从0开始计算，本代码所有id从1开始，故此处减1
+                # ！！！！！！！！！！！！！！！！ns3中节点id从0开始计算，本代码所有id从1开始
                 is_malicious = 1 if src_node_id - 1 in log_data['malicious_nodes'] else 0
                 is_blackhole = 1 if src_node_id - 1 in log_data['blackhole_nodes'] else 0
                 if src_node_id == 1:
@@ -227,9 +227,9 @@ def process_ns3_csv(input_rx_file, output_file, log_file, time_interval=10.0):
                 original_edges = original_edges.drop_duplicates(subset=['listener'])
                 for _, row in original_edges.iterrows():
                     # 反向边的 ListenerNode 和 SrcNodeId 对调，特征值全部为 0
-                    # ！！！！！！！！！！！！！！！！ns3中节点id从0开始计算，本代码所有id从1开始，故此处加1
-                    is_malicious = 1 if row['listener'] in log_data['malicious_nodes'] else 0
-                    is_blackhole = 1 if row['listener'] in log_data['blackhole_nodes'] else 0
+                    # ！！！！！！！！！！！！！！！！ns3中节点id从0开始计算，本代码所有id从1开始，故此处减1
+                    is_malicious = 1 if row['listener'] - 1 in log_data['malicious_nodes'] else 0
+                    is_blackhole = 1 if row['listener'] - 1 in log_data['blackhole_nodes'] else 0
 
                     # 获取当前时间段丢包次数
                     # ！！！！！！！！！！！！！！！！ns3中节点id从0开始计算，本代码所有id从1开始，故此处加1
@@ -451,7 +451,8 @@ def process_ns3_data(df):
     labels_tensor = labels_one_hot.float()  # 转换为float类型（常用于分类任务）
 
     # 步骤10：返回PyG数据对象
-    data = Data(x=hypernode_features, edge_index=edge_index, y=labels_tensor,
+    data = Data(x=hypernode_features[:, 0:-3], edge_attr=hypernode_features[:, -3:], edge_index=edge_index,
+                y=labels_tensor,
                 edge_ids=edge_ids, edge_weights=hyperedge_weights)  # 添加边ID作为超图节点ID，返回的x包含链路特征，特征最后三列
 
     adj = sparse_mx_to_torch_sparse_tensor(normalize(adj + sp.eye(adj.shape[0])))
@@ -474,9 +475,6 @@ def process_ns3_data_by_timeid(df):
         adj_per_timeid.append(adj)
         T_per_timeid.append(T)
 
-    data_per_timeid = data_per_timeid[:-1]
-    adj_per_timeid = adj_per_timeid[:-1]
-    T_per_timeid = T_per_timeid[:-1]
     return data_per_timeid, adj_per_timeid, T_per_timeid, len(timeid_groups) - 1
 
 

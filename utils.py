@@ -288,8 +288,12 @@ def process_ns3_data(df):
     df = df.sort_values(by="SrcNodeId")
     # 步骤1：提取节点的特征 第一组特征：UDPCount, ARPRequestCount, ARPReplayCount, RouteRequestCount, RouteReplayCount,
     # RouteErrorCount, RouteReplayACKCount, ACKCount
-    node_features_group_1 = df[['SendUDPCount', 'SendARPRequestCount', 'SendARPReplayCount',
-                                'SendRouteRequestCount', 'SendRouteReplayCount', 'SendRouteErrorCount',
+    node_features_group_1 = df[['SendUDPCount',
+                                'SendARPRequestCount',
+                                'SendARPReplayCount',
+                                'SendRouteRequestCount',
+                                'SendRouteReplayCount',
+                                'SendRouteErrorCount',
                                 'SendRouteReplayACKCount',
                                 'FwUDPCount',
                                 'FwARPRequestCount',
@@ -298,9 +302,15 @@ def process_ns3_data(df):
                                 'FwRouteReplayCount',
                                 'FwRouteErrorCount',
                                 'FwRouteReplayACKCount',
-                                'RecUDPCount', 'RecARPRequestCount', 'RecARPReplayCount',
-                                'RecRouteRequestCount', 'RecRouteReplayCount', 'RecRouteErrorCount',
-                                'RecRouteReplayACKCount', 'RecACKCount', 'IsSink']].values
+                                'RecUDPCount',
+                                'RecARPRequestCount',
+                                'RecARPReplayCount',
+                                'RecRouteRequestCount',
+                                'RecRouteReplayCount',
+                                'RecRouteErrorCount',
+                                'RecRouteReplayACKCount',
+                                'RecACKCount',
+                                'IsSink']].values
     node_features_group_1 = torch.tensor(node_features_group_1, dtype=torch.int)
     num_feature1 = node_features_group_1.size(1)
 

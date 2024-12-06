@@ -194,6 +194,9 @@ def process_ns3_csv(input_rx_file, output_file, log_file, time_interval=10.0):
                     'RecRouteReplayACKCount': rec_route_reply_ack_count[src_node_id],
                     'RecACKCount': rec_ack_count[src_node_id],
                     'IsSink': is_sink,
+                    'PacketLossRate': rec_ack_count[src_node_id] / rec_udp_count[src_node_id],
+                    'DataReportRate': udp_count / 2000,
+                    'DataForwardRate': (fw_udp_count[src_node_id] - udp_count) / (2 * rec_udp_count[src_node_id]),
                     'AvgSNR': avg_snr,
                     'AvgSignalPower': avg_signal_power,
                     'AvgNoisePower': avg_noise_power,
@@ -262,6 +265,9 @@ def process_ns3_csv(input_rx_file, output_file, log_file, time_interval=10.0):
                         'RecRouteReplayACKCount': 0,
                         'RecACKCount': 0,
                         'IsSink': is_sink,
+                        'PacketLossRate': 0,
+                        'DataReportRate': 0,
+                        'DataForwardRate': 0,
                         'AvgSNR': 0,
                         'AvgSignalPower': 0,
                         'AvgNoisePower': 0,
@@ -288,47 +294,12 @@ def process_ns3_data(df):
     # 在时间段内按源节点ID排序
     df = df.sort_values(by="SrcNodeId")
     # 计算三个特征
-    node_features_group_1 = df[['SendUDPCount', 'SendARPRequestCount', 'SendARPReplayCount',
-                                'SendRouteRequestCount', 'SendRouteReplayCount', 'SendRouteErrorCount',
-                                'SendRouteReplayACKCount', 'FwUDPCount', 'FwARPRequestCount',
-                                'FwARPReplayCount', 'FwRouteRequestCount', 'FwRouteReplayCount',
-                                'FwRouteErrorCount', 'FwRouteReplayACKCount', 'RecUDPCount',
-                                'RecARPRequestCount', 'RecARPReplayCount', 'RecRouteRequestCount',
-                                'RecRouteReplayCount', 'RecRouteErrorCount', 'RecRouteReplayACKCount',
-                                'RecACKCount', 'IsSink']].copy()
+    node_features_group_1 = df[['PacketLossRate',
+                        'DataReportRate',
+                        'DataForwardRate']].values
 
-    # 1. 丢包率（Packet Loss Rate, f^(t,L)）：
-    node_features_group_1['PacketLossRate'] = (
-            (2 * node_features_group_1['RecUDPCount'] - node_features_group_1['RecACKCount']) /
-            (2 * node_features_group_1['RecUDPCount'])
-    ).replace([np.inf, -np.inf], 0).fillna(0)
-
-    # 2. 数据上报率（Data Report Rate, f^(t,R)）：
-    node_features_group_1['DataReportRate'] = (
-            (node_features_group_1['SendUDPCount']) /
-            2000
-    ).replace([np.inf, -np.inf], 0).fillna(0)
-
-    # 3. 数据转发率（Data Forward Rate, f^(t,F)）：
-    node_features_group_1['DataForwardRate'] = (
-            (2 * node_features_group_1['RecUDPCount'] - node_features_group_1['FwUDPCount']) /
-            (2 * node_features_group_1['RecUDPCount'])
-    ).replace([np.inf, -np.inf], 0).fillna(0)
-    # print(node_features_group_1)
-    # 第三步：可选的归一化处理
-    # 如果需要对特征值进行归一化
-    from sklearn.preprocessing import MinMaxScaler
-
-    scaler = MinMaxScaler()
-    node_features_group_1[['PacketLossRate', 'DataReportRate', 'DataForwardRate']] = scaler.fit_transform(
-        node_features_group_1[['PacketLossRate', 'DataReportRate', 'DataForwardRate']]
-    )
-
-    # 第四步：保存或返回新特征
-    # 更新后的 DataFrame
-    new_node_features_group_1 = node_features_group_1[['PacketLossRate', 'DataReportRate', 'DataForwardRate']].values
     # print(new_node_features_group_1)
-    new_node_features_group_1 = torch.tensor(new_node_features_group_1, dtype=torch.float)
+    new_node_features_group_1 = torch.tensor(node_features_group_1, dtype=torch.float)
     num_feature1 = new_node_features_group_1.size(1)
 
 

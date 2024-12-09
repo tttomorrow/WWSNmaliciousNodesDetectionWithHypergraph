@@ -45,10 +45,11 @@ class GraphConvolution(Module):
 
     def forward(self, H_v, edge_features, adj_v, T):
         # print(self.p.shape)
+        device = edge_features.device
         multiplier = torch.spmm(T, torch.diag((edge_features @ self.p.t()).t()[0])) @ T.to_dense().t()
-        mask = torch.eye(multiplier.shape[0])
+        mask = torch.eye(multiplier.shape[0]).to(device)
 
-        M = mask * torch.ones(multiplier.shape[0]) + (1. - mask) * multiplier
+        M = mask * torch.ones(multiplier.shape[0]).to(device) + (1. - mask) * multiplier
 
         adjusted_A = torch.mul(M, adj_v.to_dense())
 
@@ -82,6 +83,9 @@ class CustomBatchNorm(nn.Module):
 
     def forward(self, x):
         # 在训练模式下，计算均值和方差；在推理模式下，使用移动平均
+        device = x.device
+        self.running_mean = self.running_mean.to(device)
+        self.running_var = self.running_var.to(device)
         if self.training:
             # 计算当前batch的均值和方差
             batch_mean = x.mean(dim=0)

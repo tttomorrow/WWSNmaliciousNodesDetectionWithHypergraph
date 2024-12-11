@@ -475,7 +475,7 @@ def process_ns3_data_by_timeid(df):
         adj_per_timeid.append(adj)
         T_per_timeid.append(T)
 
-    return data_per_timeid, adj_per_timeid, T_per_timeid, len(timeid_groups) - 1
+    return data_per_timeid, adj_per_timeid, T_per_timeid, len(timeid_groups)
 
 
 # def process_wwsn_data(df):

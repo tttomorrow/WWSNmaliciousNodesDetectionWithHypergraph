@@ -1,14 +1,15 @@
-import pandas as pd
-import numpy as np
 import re
-import torch
+from collections import defaultdict
+
 import networkx as nx
-from torch_geometric.data import Data
-from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+import pandas as pd
 import scipy.sparse as sp
+import torch
 import torch.nn.functional as F
 from sklearn.metrics import roc_auc_score
-from collections import defaultdict
+from sklearn.metrics.pairwise import cosine_similarity
+from torch_geometric.data import Data
 
 
 def parse_log_file(log_file, time_interval):

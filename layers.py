@@ -1,10 +1,12 @@
 import math
+
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.nn.parameter import Parameter
 from torch.nn.modules.module import Module
+from torch.nn.parameter import Parameter
 from torch_geometric.nn import HypergraphConv  # 导入超图卷积层的实现
+
 
 # 定义超图卷积层
 class HypergraphConvLayer(nn.Module):

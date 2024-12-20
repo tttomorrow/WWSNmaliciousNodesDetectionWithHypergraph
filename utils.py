@@ -595,4 +595,4 @@ def confusion_matrix(output, labels):
     fp = ((preds == 1) & (labels[:, 1] == 0)).sum().item()  # 假正类
     fn = ((preds == 0) & (labels[:, 1] == 1)).sum().item()  # 假负类
 
-    return {'TP': tp, 'TN': tn, 'FP': fp, 'FN': fn}
+    return tp, tn, fp, fn

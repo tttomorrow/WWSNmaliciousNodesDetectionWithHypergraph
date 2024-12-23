@@ -60,7 +60,7 @@ def parse_log_file(log_file, time_interval):
     }
 
 
-def process_ns3_csv(input_rx_file, output_file, log_file, time_interval=10.0):
+def process_ns3_csv(input_rx_file, output_file, log_file, time_interval):
     # 读取 RX CSV 文件
     df = pd.read_csv(input_rx_file)
 

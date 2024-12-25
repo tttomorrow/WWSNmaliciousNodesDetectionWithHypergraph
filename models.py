@@ -8,14 +8,14 @@ from layers import HypergraphConvLayer, GraphConvolution, CustomBatchNorm
 
 # 定义整体超图模型
 class HypergraphModel(nn.Module):
-    def __init__(self, num_features, edge_features_size):
+    def __init__(self, num_features, edge_features_size, hidden_size):
         super(HypergraphModel, self).__init__()
         # 初始化两个超图卷积层
-        self.layer1 = HypergraphConvLayer(num_features, 32)  # 第一个超图卷积层，输出特征为64
+        self.layer1 = HypergraphConvLayer(num_features, hidden_size)  # 第一个超图卷积层，输出特征为64
         # self.layer2 = HypergraphConvLayer(64, 8)  # 第二个超图卷积层，输出特征为8
-        self.edge_conv = GraphConvolution(32, 32, edge_features_size, 32)  # 图卷积层，融合边特征
+        self.edge_conv = GraphConvolution(hidden_size, hidden_size, edge_features_size, hidden_size)  # 图卷积层，融合边特征
         # 分类器
-        self.class_classifier = nn.Sequential(nn.Linear(32, 16),
+        self.class_classifier = nn.Sequential(nn.Linear(hidden_size, 16),
                                               nn.ReLU(),
                                               # nn.Dropout(p=self.dropout),
                                               nn.Linear(16, 2))

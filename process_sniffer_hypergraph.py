@@ -154,7 +154,6 @@ def process_realworld_batch(df):
     # 初始化标签，全为 0
     labels = torch.zeros(len(hyperedge_weights), dtype=torch.long)
 
-    # 设置特定索引的标签，例如第 9 和 6 个元素为 1
     positive_indices = [9, 6]
     labels[positive_indices] = 1
 

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from layers import HypergraphConvLayer, GraphConvolution, CustomBatchNorm
-
+from torch_geometric.nn import GATConv, SAGEConv
 
 
 
@@ -73,3 +73,58 @@ class HypergraphModel(nn.Module):
         stack_nodes_features = torch.stack(nodes_features, dim=0)
 
         return stack_nodes_features
+
+
+
+# 定义GAT模型
+class GATModel(nn.Module):
+    def __init__(self, num_features, edge_features_size, hidden_size):
+        super(GATModel, self).__init__()
+        # 初始化GAT卷积层
+        self.gat1 = GATConv(num_features+edge_features_size, hidden_size, heads=4, concat=True, dropout=0.0)
+        self.gat2 = GATConv(hidden_size * 4, hidden_size, heads=1, concat=False, dropout=0.1)
+        # 分类器
+        self.class_classifier = nn.Sequential(
+            nn.Linear(hidden_size, 16),
+            nn.ReLU(),
+            nn.Linear(16, 2)
+        )
+        self.norm1 = nn.BatchNorm1d(num_features+edge_features_size)
+
+    def forward(self, x, edge_index, edge_weight, edge_features, adj, T):
+        # 特征归一化
+        x = self.norm1(x)
+        # GAT卷积
+        x = self.gat1(x, edge_index)
+        x = F.elu(x)
+        x = self.gat2(x, edge_index)
+        # 分类
+        class_output = self.class_classifier(x)
+        return class_output
+
+
+# 定义GraphSAGE模型
+class GraphSAGEModel(nn.Module):
+    def __init__(self, num_features, edge_features_size, hidden_size):
+        super(GraphSAGEModel, self).__init__()
+        # 初始化GraphSAGE卷积层
+        self.sage1 = SAGEConv(num_features+edge_features_size, hidden_size)
+        self.sage2 = SAGEConv(hidden_size, hidden_size)
+        # 分类器
+        self.class_classifier = nn.Sequential(
+            nn.Linear(hidden_size, 16),
+            nn.ReLU(),
+            nn.Linear(16, 2)
+        )
+        self.norm1 = nn.BatchNorm1d(num_features+edge_features_size)
+
+    def forward(self, x, edge_index, edge_weight, edge_features, adj, T):
+        # 特征归一化
+        x = self.norm1(x)
+        # SAGE卷积
+        x = self.sage1(x, edge_index)
+        x = F.relu(x)
+        x = self.sage2(x, edge_index)
+        # 分类
+        class_output = self.class_classifier(x)
+        return class_output

@@ -34,7 +34,7 @@ class GraphConvolution(Module):
         else:
             self.register_parameter('bias', None)  # 如果不使用偏置项，注册为None
         self.reset_parameters()  # 重置参数
-        self.p = Parameter(torch.from_numpy(np.random.normal(size=(1, 3))).float())
+        self.p = Parameter(torch.from_numpy(np.random.normal(size=(1, in_features_e))).float())
 
     def reset_parameters(self):
         # 使用均匀分布初始化权重和偏置

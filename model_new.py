@@ -82,10 +82,10 @@ class HypergraphTemporalModel(nn.Module):
                                                     dropout=self.dropout)
 
         # 分类器
-        self.class_classifier = nn.Sequential(nn.Linear(self.embedding_dim, self.embedding_dim//2),
+        self.class_classifier = nn.Sequential(nn.Linear(self.embedding_dim, self.embedding_dim // 2),
                                               nn.ReLU(),
                                               nn.Dropout(p=self.dropout),
-                                              nn.Linear(self.embedding_dim//2, 2),
+                                              nn.Linear(self.embedding_dim // 2, 2),
                                               )
 
     def forward(self, fea, edge_index, edge_attr, edge_weights, l, args):
@@ -96,7 +96,8 @@ class HypergraphTemporalModel(nn.Module):
 
         if args.weights == 1:
             if l == 5:
-                x = self.gcn_conv(input1.to(device), edge_index.to(device), edge_weights.to(device), edge_attr.to(device))
+                x = self.gcn_conv(input1.to(device), edge_index.to(device), edge_weights.to(device),
+                                  edge_attr.to(device))
             elif l == 1:
                 x = self.hypergraph_conv1(input1, edge_index.to(device), edge_weights.to(device), edge_attr.to(device))
                 x = self.hypergraph_conv1(input1, edge_index.to(device), edge_weights.to(device))
@@ -130,53 +131,20 @@ class HypergraphTemporalModel(nn.Module):
                 x = self.hypergraph_conv4(x, edge_index.to(device))
                 x = self.hypergraph_conv4(x, edge_index.to(device))
 
-        # 归一化
-        # x = F.normalize(x)
-        # x = F.relu(x)
-        # 循环神经网络
-        # print(len(indice))
-        # print(x.size())
-        # x = self.hyper_rnn(input1)
-        # x = self.liner3(input1)
-        # x = self.hyper_rnn(x)
-        # x = self.hypergraph_conv2(x, hyper_index.to(device))
-        # 归一化
-        # x = F.normalize(x)
-
-        # 处理原始特征
-        # fea = self.gcn_conv1(fea.to(device), hyper_index)
-        # fea = self.liner1(fea.to(device))
-        # sorted_values, sorted_indices = torch.sort(fea[:, 0], dim=0)
-        # fea = fea[sorted_indices]
-        # x = x[sorted_indices]
-        # fea = self.features1(fea.to(device))
         fea = self.liner4(fea[:, 1:].to(device))
-        # fea = fea.unsqueeze(1)  # 加入时间维度 [batch, seq=1, feat]
-        # fea, _ = self.hyper_rnn(fea)  # LSTM 输出
-        # fea = fea.squeeze(1)  # 去掉时间维度恢复 [batch, feat]
+        fea = fea.unsqueeze(1)  # 加入时间维度 [batch, seq=1, feat]
+        fea, _ = self.hyper_rnn(fea)  # LSTM 输出
+        fea = fea.squeeze(1)  # 去掉时间维度恢复 [batch, feat]
 
-        # x = x.unsqueeze(1)  # 加入时间维度 [batch, seq=1, feat]
-        # x, _ = self.hyper_rnn(x)  # LSTM 输出
-        # x = x.squeeze(1)  # 去掉时间维度恢复 [batch, feat]
+        x = x.unsqueeze(1)  # 加入时间维度 [batch, seq=1, feat]
+        x, _ = self.hyper_rnn(x)  # LSTM 输出
+        x = x.squeeze(1)  # 去掉时间维度恢复 [batch, feat]
 
         # 特征融合
-        # 直接拼接
         # input = torch.cat([fea.to(device), x.to(device)], dim=1).to(device)
         # input = self.liner(input.to(device))
         # shared_feature = input
-
-        # 多头注意力特征融合
-        # input = fea
         shared_feature, _ = self.multihead_attn(fea, x, fea)
-        # shared_feature = torch.cat([x.to(device), x.to(device)], dim=1).to(device)
-
-        # shared_feature = self.liner2(shared_feature.to(device))
-        # shared_feature = self.hyper_rnn(shared_feature.to(device))
-        shared_feature = shared_feature.unsqueeze(1)  # 加入时间维度 [batch, seq=1, feat]
-        shared_feature, _ = self.hyper_rnn(shared_feature)  # LSTM 输出
-        shared_feature = shared_feature.squeeze(1)  # 去掉时间维度恢复 [batch, feat]
-        # AFF
-        # shared_feature = self.aff(x, fea)
 
         # 分类结果
         class_output = self.class_classifier(shared_feature.to(device))

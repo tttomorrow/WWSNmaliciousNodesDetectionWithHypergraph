@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from layers import HypergraphConvLayer, GraphConvolution, CustomBatchNorm
-from torch_geometric.nn import GATConv, SAGEConv
+from torch_geometric.nn import GATConv, SAGEConv, GCNConv
 
 
 
@@ -12,12 +12,12 @@ class HypergraphModel(nn.Module):
         super(HypergraphModel, self).__init__()
         # 初始化两个超图卷积层
         self.layer1 = HypergraphConvLayer(num_features, hidden_size)  # 第一个超图卷积层，输出特征为64
-        # self.layer2 = HypergraphConvLayer(64, 8)  # 第二个超图卷积层，输出特征为8
+        self.layer2 = HypergraphConvLayer(hidden_size, hidden_size)  # 第二个超图卷积层，输出特征为8
         self.edge_conv = GraphConvolution(hidden_size, hidden_size, edge_features_size, hidden_size)  # 图卷积层，融合边特征
         # 分类器
         self.class_classifier = nn.Sequential(nn.Linear(hidden_size, 16),
                                               nn.ReLU(),
-                                              # nn.Dropout(p=self.dropout),
+                                              # nn.Dropout(p=0.1),
                                               nn.Linear(16, 2))
         self.norm1 = CustomBatchNorm(num_features, num_features)
         self.norm2 = CustomBatchNorm(edge_features_size, edge_features_size)
@@ -29,7 +29,7 @@ class HypergraphModel(nn.Module):
         x = self.norm1(x)
         # print(x)
         x = self.layer1(x, edge_index, edge_weight)  # 通过第一个超图卷积层
-        # x = self.layer2(x, edge_index, edge_weight)  # 通过第二个超图卷积层
+        x = self.layer2(x, edge_index, edge_weight)  # 通过第二个超图卷积层
 
         x = F.relu(x)  # 激活函数
 
@@ -39,6 +39,7 @@ class HypergraphModel(nn.Module):
         edge_features = self.norm2(edge_features)
         shared_feature = self.edge_conv(node_features, edge_features, adj, T)  # 将边特征融合到节点特征中
 
+        # shared_feature = self.layer2(shared_feature, edge_index, edge_weight)
         # 分类结果
         class_output = self.class_classifier(shared_feature)
 
@@ -124,7 +125,41 @@ class GraphSAGEModel(nn.Module):
         # SAGE卷积
         x = self.sage1(x, edge_index)
         x = F.relu(x)
-        x = self.sage2(x, edge_index)
+        # x = self.sage2(x, edge_index)
         # 分类
         class_output = self.class_classifier(x)
         return class_output
+
+
+class GCNModel(nn.Module):
+    def __init__(self, num_features, edge_features_size, hidden_size):
+        super(GCNModel, self).__init__()
+        input_size = num_features + edge_features_size
+
+        # 图卷积层
+        self.gcn1 = GCNConv(input_size, hidden_size)
+        self.gcn2 = GCNConv(hidden_size, hidden_size)
+
+        # 批归一化
+        self.norm1 = nn.BatchNorm1d(input_size)
+
+        # 分类器
+        self.class_classifier = nn.Sequential(
+            nn.Linear(hidden_size, 16),
+            nn.ReLU(),
+            nn.Linear(16, 2)
+        )
+
+    def forward(self, x, edge_index, edge_weight=None, edge_features=None, adj=None, T=None):
+
+        x = self.norm1(x)
+
+        # GCN 层
+        x = self.gcn1(x, edge_index)
+        x = F.relu(x)
+        x = self.gcn2(x, edge_index)
+        x = F.relu(x)
+
+        # 分类
+        out = self.class_classifier(x)
+        return out

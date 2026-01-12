@@ -16,7 +16,14 @@ class HypergraphConvLayer(nn.Module):
         # 前向传播函数，输入为节点特征、超边连接和超边权重
         return self.conv(x, edge_index, edge_weight)  # 返回卷积层的输出
 
+class HypergraphConvLayerwoL1(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(HypergraphConvLayerwoL1, self).__init__()
+        self.conv = HypergraphConv(in_channels, out_channels)  # 创建超图卷积层
 
+    def forward(self, x, edge_index):
+        # 前向传播函数，输入为节点特征、超边连接和超边权重
+        return self.conv(x, edge_index)  # 返回卷积层的输出
 # 定义图卷积层
 class GraphConvolution(Module):
     def __init__(self, in_features_v, out_features_v, in_features_e, out_features_e, bias=True):
